@@ -1,0 +1,50 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#  RoyalTrade  ·  Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Player-to-player trading, built so that agreeing to a deal and then changing it
+#  cannot work.
+#
+#  The protections are not optional and are not configurable, because a trade
+#  window with the safety turned off is worse than no trade window:
+#
+#    · Any change to either offer clears BOTH confirmations.
+#    · Once both sides confirm the trade freezes and cannot be edited.
+#    · Offered items leave the inventory and are held in escrow, so the same item
+#      cannot be offered in two trades at once.
+#    · Escrow is written to disk, so a crash returns items instead of eating them.
+#
+#  What you can tune is below.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# How long the trade stays frozen after both sides confirm, before it completes.
+# This is the window that stops a last-instant edit racing the transfer. Players
+# see a countdown item while it runs. Zero completes immediately, which is not
+# recommended: the pause is also the last chance either side has to notice.
+settle-seconds: 3
+
+# How long a trade request stays open before it expires.
+request-expiry-seconds: 60
+
+# Minimum gap between one player's trade requests, so /trade cannot be used to
+# spam someone's chat.
+request-cooldown-seconds: 5
+
+# ── Who may trade with whom ─────────────────────────────────────────────────
+# Both of these are anti-abuse settings as much as convenience ones: requiring
+# players to be near each other makes selling for real money less convenient,
+# because it stops being something you can do from anywhere.
+
+# Refuse trades between players in different worlds.
+same-world-only: true
+
+# Maximum distance in blocks. -1 disables the check.
+max-distance: -1
+
+# Refuse trades involving an account with less than this much playtime, in hours.
+# 0 disables the check.
+#
+# A throwaway alt created to receive a main account's wealth is the usual shape
+# of real-money trading and of ban evasion. A playtime floor does not prevent it,
+# but it makes it cost something. Off by default because it is a blunt tool and
+# it also blocks a genuinely new player being given a starter kit by a friend.
+min-playtime-hours: 0

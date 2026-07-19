@@ -1,0 +1,23 @@
+name: RoyalTrade
+version: ${version}
+main: com.mystipixel.royaltrade.RoyalTradePlugin
+api-version: '1.21'
+author: Mystipixel
+description: Player-to-player trading that cannot be changed after both sides agree.
+# Vault provides the money half; without it items still trade and coins are refused.
+# EconGuard is reported to when present — trades are the most direct way to move
+# wealth between accounts, so they should never be a gap in its ledger.
+softdepend:
+  - Vault
+  - EconGuard
+commands:
+  trade:
+    description: Trade with another player.
+    usage: /trade <player>
+permissions:
+  royaltrade.trade:
+    description: Use /trade.
+    default: true
+  royaltrade.admin:
+    description: Reload RoyalTrade.
+    default: op
