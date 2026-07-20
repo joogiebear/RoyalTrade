@@ -10,12 +10,12 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -35,7 +35,7 @@ public final class TradeListener implements Listener {
 
     /** Players whose window we closed on purpose, so the close handler does not cancel the trade. */
     private final Set<UUID> expectedClose = new HashSet<>();
-    /** Players who are typing a coin amount in chat. */
+    /** Players at the coin sign, so closing the window for it does not cancel the trade. */
     private final Set<UUID> awaitingCoins = new HashSet<>();
 
     public TradeListener(RoyalTradePlugin plugin) {
@@ -218,6 +218,16 @@ public final class TradeListener implements Listener {
 
     // ------------------------------------------------------------------ coins
 
+    /**
+     * Ask for a coin amount on a sign.
+     *
+     * <p>A sign rather than chat because the amount is part of the trade, and sending someone to the
+     * chat box to type it drops them out of the window mid-negotiation — and puts the number in
+     * public chat, where the other player reads the offer before it is formally on the table.
+     *
+     * <p>The sign has to close the trade window to open, so {@code awaitingCoins} suppresses the
+     * close-cancels-the-trade rule until they come back.
+     */
     private void promptCoins(Player player, TradeSession session) {
         if (!plugin.economy().isPresent()) {
             plugin.messages().send(player, "no-economy");
@@ -225,67 +235,59 @@ public final class TradeListener implements Listener {
         }
         awaitingCoins.add(player.getUniqueId());
         expectedClose.add(player.getUniqueId());
-        player.closeInventory();
-        plugin.messages().send(player, "coins-prompt");
+        plugin.signInput().request(player,
+                List.of("^^^^^^^^^^^^^^^", "How many coins", "to offer?"),
+                typed -> applyCoins(player, typed));
     }
 
     /**
-     * Read a coin amount typed in chat.
-     *
-     * <p>Chat is async, so nothing here touches the session directly — the work is handed to the
-     * main thread. Mutating a trade from an async thread is the kind of race that produces two
-     * different answers to "what was on the table".
+     * Handle what came back off the sign. {@code typed} is null when the sign could not be opened —
+     * the player still has to end up back in the trade, not stranded.
      */
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onChat(AsyncPlayerChatEvent event) {
-        Player player = event.getPlayer();
-        if (!awaitingCoins.contains(player.getUniqueId())) {
+    private void applyCoins(Player player, String typed) {
+        awaitingCoins.remove(player.getUniqueId());
+        TradeSession session = plugin.trades().sessionOf(player);
+        if (session == null || !session.editable()) {
             return;
         }
-        event.setCancelled(true);
-        String typed = event.getMessage().trim();
-        awaitingCoins.remove(player.getUniqueId());
-
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            TradeSession session = plugin.trades().sessionOf(player);
-            if (session == null || !session.editable()) {
-                return;
-            }
-            TradeSession.Side side = session.sideOf(player.getUniqueId());
-            if (side == null) {
-                return;
-            }
-            if (!typed.equalsIgnoreCase("cancel")) {
-                double amount;
-                try {
-                    amount = Double.parseDouble(typed.replace(",", ""));
-                } catch (NumberFormatException e) {
-                    plugin.messages().send(player, "coins-invalid");
-                    reopen(player, session);
-                    return;
-                }
-                if (amount < 0) {
-                    plugin.messages().send(player, "coins-invalid");
-                    reopen(player, session);
-                    return;
-                }
-                if (!plugin.economy().has(player, amount)) {
-                    plugin.messages().send(player, "coins-too-much");
-                    reopen(player, session);
-                    return;
-                }
-                boolean hadConfirmation = anyConfirmed(session);
-                session.setCoins(side, amount);
-                plugin.trades().persist(session);
-                plugin.messages().send(player, "coins-set",
-                        Map.of("amount", plugin.economy().format(amount)));
-                Player other = Bukkit.getPlayer(session.other(side).playerId());
-                if (other != null && hadConfirmation) {
-                    plugin.messages().send(other, "confirm-reset");
-                }
-            }
+        TradeSession.Side side = session.sideOf(player.getUniqueId());
+        if (side == null) {
+            return;
+        }
+        if (typed == null || typed.isBlank() || typed.equalsIgnoreCase("cancel")) {
             reopen(player, session);
-        });
+            return;
+        }
+
+        double amount;
+        try {
+            amount = Double.parseDouble(typed.replace(",", "").replace("$", ""));
+        } catch (NumberFormatException e) {
+            plugin.messages().send(player, "coins-invalid");
+            reopen(player, session);
+            return;
+        }
+        if (amount < 0) {
+            plugin.messages().send(player, "coins-invalid");
+            reopen(player, session);
+            return;
+        }
+        if (!plugin.economy().has(player, amount)) {
+            plugin.messages().send(player, "coins-too-much");
+            reopen(player, session);
+            return;
+        }
+
+        boolean hadConfirmation = anyConfirmed(session);
+        session.setCoins(side, amount);
+        plugin.trades().persist(session);
+        plugin.messages().send(player, "coins-set",
+                Map.of("amount", plugin.economy().format(amount)));
+        Player other = Bukkit.getPlayer(session.other(side).playerId());
+        if (other != null && hadConfirmation) {
+            plugin.messages().send(other, "confirm-reset");
+        }
+        reopen(player, session);
     }
 
     private void reopen(Player player, TradeSession session) {

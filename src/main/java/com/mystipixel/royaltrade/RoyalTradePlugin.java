@@ -3,6 +3,7 @@ package com.mystipixel.royaltrade;
 import com.mystipixel.royaltrade.command.TradeCommand;
 import com.mystipixel.royaltrade.data.Escrow;
 import com.mystipixel.royaltrade.data.TradeLog;
+import com.mystipixel.royaltrade.gui.SignInput;
 import com.mystipixel.royaltrade.gui.TradeGui;
 import com.mystipixel.royaltrade.hooks.EconGuardHook;
 import com.mystipixel.royaltrade.hooks.EconomyHook;
@@ -29,6 +30,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
     private TradeLog log;
     private TradeManager trades;
     private TradeGui gui;
+    private SignInput signInput;
 
     private long settleMillis;
     private long requestExpiryMillis;
@@ -55,6 +57,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
         trades = new TradeManager(economy, escrow, log, new EconGuardHook());
         gui = new TradeGui(economy);
+        signInput = new SignInput(this);
 
         TradeCommand command = new TradeCommand(this);
         if (getCommand("trade") != null) {
@@ -62,6 +65,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
             getCommand("trade").setTabCompleter(command);
         }
         getServer().getPluginManager().registerEvents(new TradeListener(this), this);
+        getServer().getPluginManager().registerEvents(signInput, this);
 
         // Drive the settle window. One second is fine: the window is measured in seconds, and a
         // shorter tick would only add wake-ups for a queue that is almost always empty.
@@ -183,6 +187,10 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
     public TradeGui gui() {
         return gui;
+    }
+
+    public SignInput signInput() {
+        return signInput;
     }
 
     public long settleMillis() {

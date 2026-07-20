@@ -50,7 +50,7 @@ public final class MessageManager {
         DEFAULTS.put("economy-error", "&cThe payment failed. Nothing was traded.");
         DEFAULTS.put("other-left", "&cThe other player left. The trade was cancelled.");
         DEFAULTS.put("coins-prompt",
-                "&7Type an amount in chat, or &fcancel&7 to leave it as it is.");
+                "&7Type an amount on the sign, or leave it blank to keep the current offer.");
         DEFAULTS.put("coins-invalid", "&cThat is not a valid amount.");
         DEFAULTS.put("coins-too-much", "&cYou do not have that much.");
         DEFAULTS.put("coins-set", "&aYour coin offer is now &f{amount}&a.");
