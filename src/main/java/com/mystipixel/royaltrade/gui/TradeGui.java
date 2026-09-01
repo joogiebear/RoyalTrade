@@ -54,10 +54,12 @@ public final class TradeGui {
     public static final int CLOSE = 45;
 
     private final EconomyHook economy;
+    private final java.util.function.LongSupplier settleMillis;
     private final Map<UUID, Inventory> views = new HashMap<>();
 
-    public TradeGui(EconomyHook economy) {
+    public TradeGui(EconomyHook economy, java.util.function.LongSupplier settleMillis) {
         this.economy = economy;
+        this.settleMillis = settleMillis;
     }
 
     public Inventory viewOf(Player player) {
@@ -124,8 +126,13 @@ public final class TradeGui {
         inv.setItem(THEIR_COINS, coinItem("&eTheir offer", them.coins(), false));
 
         boolean settling = session.state() == TradeSession.State.SETTLING;
-        inv.setItem(MY_CONFIRM, confirmItem(viewer.confirmed(), true, settling));
-        inv.setItem(THEIR_CONFIRM, confirmItem(them.confirmed(), false, settling));
+        long secondsLeft = 0;
+        if (settling) {
+            long elapsed = System.currentTimeMillis() - session.settlingSince();
+            secondsLeft = Math.max(1, (settleMillis.getAsLong() - elapsed + 999) / 1000);
+        }
+        inv.setItem(MY_CONFIRM, confirmItem(viewer.confirmed(), true, settling, secondsLeft));
+        inv.setItem(THEIR_CONFIRM, confirmItem(them.confirmed(), false, settling, secondsLeft));
         inv.setItem(CLOSE, named(Material.BARRIER, "&cCancel trade",
                 List.of("&7Nothing changes hands.", "&7Your items come straight back.")));
     }
@@ -145,9 +152,11 @@ public final class TradeGui {
         return named(amount > 0 ? Material.GOLD_INGOT : Material.GOLD_NUGGET, title, lore);
     }
 
-    private ItemStack confirmItem(boolean confirmed, boolean own, boolean settling) {
+    private ItemStack confirmItem(boolean confirmed, boolean own, boolean settling, long secondsLeft) {
         if (settling) {
-            return named(Material.CLOCK, "&6Completing…",
+            // A live countdown, re-rendered each second by the settle ticker. A static "Completing…"
+            // reads as a hang, and a freeze that looks hung is exactly when people panic-click Cancel.
+            return named(Material.CLOCK, "&6Completing in " + secondsLeft + "s…",
                     List.of("&7Both sides have confirmed.", "&7The trade is locked while it settles."));
         }
         if (own) {

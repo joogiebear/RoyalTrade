@@ -40,6 +40,14 @@ same-world-only: true
 # Maximum distance in blocks. -1 disables the check.
 max-distance: -1
 
+# Items that may never be offered in a trade — quest items, soulbound gear,
+# seasonal rewards. Entries are material names (DRAGON_EGG) or eco-item ids
+# (ecoitems:soulbound_blade). Eco ids are matched by the item's identity tag,
+# so this works with or without the eco suite installed.
+blocked-items: []
+#  - DRAGON_EGG
+#  - ecoitems:soulbound_blade
+
 # Refuse trades involving an account with less than this much playtime, in hours.
 # 0 disables the check.
 #

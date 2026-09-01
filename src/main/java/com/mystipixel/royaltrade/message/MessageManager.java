@@ -37,6 +37,11 @@ public final class MessageManager {
         DEFAULTS.put("request-received",
                 "&f{player} &awants to trade. &7Type &f/trade {player} &7to accept.");
         DEFAULTS.put("request-cooldown", "&cWait a moment before sending another request.");
+        DEFAULTS.put("toggle-on",
+                "&eIncoming trade requests are now &cblocked&e. &7/trade toggle &eallows them again.");
+        DEFAULTS.put("toggle-off", "&aIncoming trade requests are now allowed.");
+        DEFAULTS.put("requests-blocked", "&c{player} isn't accepting trade requests.");
+        DEFAULTS.put("item-blocked", "&cThat item cannot be traded.");
         DEFAULTS.put("opened", "&aTrading with &f{player}&a.");
         DEFAULTS.put("cancelled", "&cTrade cancelled. Your items have been returned.");
         DEFAULTS.put("cancelled-by-other", "&c{player} cancelled the trade.");

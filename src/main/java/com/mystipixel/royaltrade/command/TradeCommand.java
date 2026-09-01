@@ -48,6 +48,14 @@ public final class TradeCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        // /trade toggle — switch incoming requests off or back on. A player named "toggle" becomes
+        // unreachable by name, the same trade-off "reload" already makes.
+        if (args[0].equalsIgnoreCase("toggle")) {
+            boolean nowBlocking = plugin.toggles().toggle(player.getUniqueId());
+            plugin.messages().send(player, nowBlocking ? "toggle-on" : "toggle-off");
+            return true;
+        }
+
         Player target = Bukkit.getPlayerExact(args[0]);
         if (target == null || !target.isOnline()) {
             plugin.messages().send(player, "no-such-player");
@@ -81,6 +89,13 @@ public final class TradeCommand implements CommandExecutor, TabCompleter {
             plugin.gui().open(session, player, target);
             plugin.messages().send(player, "opened", Map.of("player", target.getName()));
             plugin.messages().send(target, "opened", Map.of("player", player.getName()));
+            return true;
+        }
+
+        // Checked after the acceptance branch on purpose: a toggle means "stop asking me",
+        // not "cancel the request I already decided to answer".
+        if (plugin.toggles().isBlocking(target.getUniqueId())) {
+            plugin.messages().send(player, "requests-blocked", Map.of("player", target.getName()));
             return true;
         }
 
@@ -141,6 +156,9 @@ public final class TradeCommand implements CommandExecutor, TabCompleter {
         List<String> out = new ArrayList<>();
         if (args.length == 1 && sender instanceof Player player) {
             String prefix = args[0].toLowerCase();
+            if ("toggle".startsWith(prefix)) {
+                out.add("toggle");
+            }
             for (Player online : Bukkit.getOnlinePlayers()) {
                 if (!online.equals(player) && online.getName().toLowerCase().startsWith(prefix)) {
                     out.add(online.getName());

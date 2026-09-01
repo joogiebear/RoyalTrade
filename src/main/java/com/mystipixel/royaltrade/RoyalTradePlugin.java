@@ -32,6 +32,9 @@ public final class RoyalTradePlugin extends JavaPlugin {
     private TradeGui gui;
     private SignInput signInput;
 
+    private com.mystipixel.royaltrade.data.TradeToggles toggles;
+    private com.mystipixel.royaltrade.config.BlockedItems blockedItems;
+
     private long settleMillis;
     private long requestExpiryMillis;
     private long requestCooldownMillis;
@@ -48,6 +51,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         economy = new EconomyHook();
         escrow = new Escrow(getDataFolder(), getLogger());
         log = new TradeLog(getDataFolder(), getLogger());
+        toggles = new com.mystipixel.royaltrade.data.TradeToggles(getDataFolder(), getLogger());
 
         int recovered = escrow.load();
         if (recovered > 0) {
@@ -56,7 +60,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         }
 
         trades = new TradeManager(economy, escrow, log, new EconGuardHook());
-        gui = new TradeGui(economy);
+        gui = new TradeGui(economy, this::settleMillis);
         signInput = new SignInput(this);
 
         TradeCommand command = new TradeCommand(this);
@@ -88,6 +92,8 @@ public final class RoyalTradePlugin extends JavaPlugin {
     }
 
     private void readConfig() {
+        blockedItems = com.mystipixel.royaltrade.config.BlockedItems.parse(
+                getConfig().getStringList("blocked-items"), getLogger());
         settleMillis = Math.max(0L, getConfig().getLong("settle-seconds", 3L) * 1000L);
         requestExpiryMillis = Math.max(1L, getConfig().getLong("request-expiry-seconds", 60L)) * 1000L;
         requestCooldownMillis = Math.max(0L, getConfig().getLong("request-cooldown-seconds", 5L)) * 1000L;
@@ -116,6 +122,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
                 continue;
             }
             if (now - session.settlingSince() < settleMillis) {
+                gui.render(session);             // tick the countdown item once a second
                 continue;
             }
             Player a = Bukkit.getPlayer(session.a().playerId());
@@ -191,6 +198,14 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
     public SignInput signInput() {
         return signInput;
+    }
+
+    public com.mystipixel.royaltrade.data.TradeToggles toggles() {
+        return toggles;
+    }
+
+    public com.mystipixel.royaltrade.config.BlockedItems blockedItems() {
+        return blockedItems;
     }
 
     public long settleMillis() {
