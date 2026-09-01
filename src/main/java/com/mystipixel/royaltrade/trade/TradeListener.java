@@ -267,7 +267,10 @@ public final class TradeListener implements Listener {
             reopen(player, session);
             return;
         }
-        if (amount < 0) {
+        // isFinite, not just >= 0: parseDouble accepts "NaN" and "Infinity", NaN passes every <
+        // comparison, and what a Vault provider does with either is provider-defined (EssentialsX
+        // throws). Neither is ever a legitimate offer.
+        if (!Double.isFinite(amount) || amount < 0) {
             plugin.messages().send(player, "coins-invalid");
             reopen(player, session);
             return;
