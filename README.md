@@ -8,6 +8,8 @@ plugin exists to close one attack: agreeing to a deal and then altering it befor
 Coin amounts are typed on a sign rather than in chat. Chat would drop a player out of the window
 mid-negotiation, and it would put their offer in public chat before it was formally on the table.
 
+Requires Paper 26.2 or newer.
+
 ---
 
 ## How it refuses to be scammed
