@@ -11,6 +11,8 @@ import com.mystipixel.royaltrade.message.MessageManager;
 import com.mystipixel.royaltrade.trade.TradeListener;
 import com.mystipixel.royaltrade.trade.TradeManager;
 import com.mystipixel.royaltrade.trade.TradeSession;
+import org.bstats.bukkit.Metrics;
+import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -24,8 +26,12 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class RoyalTradePlugin extends JavaPlugin {
 
+    /** bStats project id. Identifies the plugin, not the server, so it is fixed rather than configurable. */
+    private static final int BSTATS_PLUGIN_ID = 33890;
+
     private MessageManager messages;
     private EconomyHook economy;
+    private EconGuardHook econGuard;
     private Escrow escrow;
     private TradeLog log;
     private TradeManager trades;
@@ -59,7 +65,8 @@ public final class RoyalTradePlugin extends JavaPlugin {
                     + "stopped. They will be returned on their next join.");
         }
 
-        trades = new TradeManager(economy, escrow, log, new EconGuardHook());
+        econGuard = new EconGuardHook();
+        trades = new TradeManager(economy, escrow, log, econGuard);
         gui = new TradeGui(economy, this::settleMillis);
         signInput = new SignInput(this);
 
@@ -78,7 +85,25 @@ public final class RoyalTradePlugin extends JavaPlugin {
         if (!economy.isPresent()) {
             getLogger().warning("No Vault economy found — items can be traded, coins cannot.");
         }
+        setupMetrics();
         getLogger().info("RoyalTrade enabled.");
+    }
+
+    /**
+     * Anonymous usage reporting via bStats.
+     *
+     * <p>Server owners who want no reporting disable it globally in plugins/bStats/config.yml, which
+     * is the mechanism bStats provides; the id itself is fixed because it names this plugin's project.
+     */
+    private void setupMetrics() {
+        Metrics metrics = new Metrics(this, BSTATS_PLUGIN_ID);
+        // Trades without a Vault economy are items-only, which is a different plugin in practice.
+        metrics.addCustomChart(new SimplePie("economy", () -> String.valueOf(economy.isPresent())));
+        metrics.addCustomChart(new SimplePie("econguard", () -> String.valueOf(econGuard.isPresent())));
+        metrics.addCustomChart(new SimplePie("settle_seconds",
+                () -> String.valueOf(settleMillis / 1000L)));
+        metrics.addCustomChart(new SimplePie("distance_limited",
+                () -> String.valueOf(maxDistance > 0.0)));
     }
 
     @Override

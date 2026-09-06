@@ -98,3 +98,10 @@ with its custom name, and both coin amounts.
 A flat file rather than a database on purpose. The question this answers is "what did these two trade
 on Tuesday", asked days later by an admin, and `grep` answers it without a query tool or a
 dependency.
+
+---
+
+## Metrics
+
+Reports anonymous usage to [bStats](https://bstats.org/plugin/bukkit/RoyalTrade/33890). Turn it off for
+the whole server in `plugins/bStats/config.yml`.
