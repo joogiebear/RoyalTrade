@@ -52,6 +52,7 @@ public final class MessageManager {
         DEFAULTS.put("nothing-offered", "&cNeither of you has offered anything.");
         DEFAULTS.put("full-inventory", "&cThere is not enough room in one of your inventories.");
         DEFAULTS.put("not-enough-money", "&cOne of you cannot cover the coins offered.");
+        DEFAULTS.put("payment-recovery", "&cThis trade is on hold because a payment could not be confirmed. Contact staff; do not repeat the trade.");
         DEFAULTS.put("economy-error", "&cThe payment failed. Nothing was traded.");
         DEFAULTS.put("other-left", "&cThe other player left. The trade was cancelled.");
         DEFAULTS.put("coins-prompt",

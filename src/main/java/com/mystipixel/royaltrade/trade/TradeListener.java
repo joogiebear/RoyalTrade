@@ -307,6 +307,10 @@ public final class TradeListener implements Listener {
     // ------------------------------------------------------------------ cancel
 
     private void cancel(TradeSession session, Player actor, boolean tellActor) {
+        if (session.state() == TradeSession.State.RECOVERY) {
+            if (tellActor) plugin.messages().send(actor, "payment-recovery");
+            return;
+        }
         Player a = Bukkit.getPlayer(session.a().playerId());
         Player b = Bukkit.getPlayer(session.b().playerId());
         plugin.trades().cancel(session);

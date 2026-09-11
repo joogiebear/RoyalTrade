@@ -37,6 +37,8 @@ public final class TradeSession {
         SETTLING,
         /** Items and money have moved. Terminal. */
         COMPLETED,
+        /** Unresolved settlement: no editing, cancellation or automatic replay. */
+        RECOVERY,
         /** Nothing moved; escrow has been returned. Terminal. */
         CANCELLED
     }
@@ -178,7 +180,7 @@ public final class TradeSession {
     }
 
     public boolean setCoins(Side side, double amount) {
-        if (!editable() || amount < 0) {
+        if (!editable() || !Double.isFinite(amount) || amount < 0) {
             return false;
         }
         side.coins = amount;
@@ -223,6 +225,12 @@ public final class TradeSession {
             settlingSince = 0L;
             touch();
         }
+    }
+
+    public void markRecovery() { state = State.RECOVERY; }
+
+    void resumeAfterRejectedPayment() {
+        if (state == State.RECOVERY) state = State.SETTLING;
     }
 
     public void markCompleted() {

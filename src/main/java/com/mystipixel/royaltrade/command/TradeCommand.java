@@ -65,6 +65,10 @@ public final class TradeCommand implements CommandExecutor, TabCompleter {
             plugin.messages().send(player, "cannot-trade-self");
             return true;
         }
+        if (plugin.trades().needsRecovery(player) || plugin.trades().needsRecovery(target)) {
+            plugin.messages().send(player, "payment-recovery");
+            return true;
+        }
         if (plugin.trades().inTrade(player)) {
             plugin.messages().send(player, "already-trading");
             return true;

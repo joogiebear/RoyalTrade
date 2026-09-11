@@ -1,6 +1,10 @@
 package com.mystipixel.royaltrade.trade;
 
 import com.mystipixel.royaltrade.data.Escrow;
+import com.mystipixel.royaltrade.data.PaymentJournal;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.logging.Logger;
 import com.mystipixel.royaltrade.data.TradeLog;
 import com.mystipixel.royaltrade.hooks.EconGuardHook;
 import com.mystipixel.royaltrade.hooks.EconomyHook;
@@ -20,9 +24,8 @@ import java.util.UUID;
  *
  * <p>{@link #commit} is the only place items and money move. It runs as one synchronous main-thread
  * block from first check to last transfer, with no scheduling, no async economy call and no event in
- * the middle — because anything that can interleave between "verify" and "transfer" is a dupe waiting
- * to be found. Every reason a trade can fail is checked <em>before</em> the first mutation, so once
- * mutation starts it runs to the end.
+ * the middle. Vault calls can reject or throw after earlier legs succeeded, so settlement receipts
+ * are persisted and unresolved trades remain held rather than completed or charged again.
  */
 public final class TradeManager {
 
@@ -33,9 +36,13 @@ public final class TradeManager {
         NOT_SETTLING,
         INSUFFICIENT_FUNDS,
         NO_INVENTORY_SPACE,
-        ECONOMY_ERROR
+        ECONOMY_ERROR,
+        RECOVERY_REQUIRED
     }
 
+    private final PaymentJournal payments;
+    private final Logger logger;
+    private final Set<UUID> recoveryPlayers = new HashSet<>();
     private final EconomyHook economy;
     private final Escrow escrow;
     private final TradeLog log;
@@ -47,7 +54,14 @@ public final class TradeManager {
     private final Map<UUID, UUID> requests = new HashMap<>();      // target -> requester
     private final Map<UUID, Long> requestedAt = new HashMap<>();
 
-    public TradeManager(EconomyHook economy, Escrow escrow, TradeLog log, EconGuardHook econGuard) {
+    public TradeManager(EconomyHook economy, Escrow escrow, TradeLog log, EconGuardHook econGuard,
+                        PaymentJournal payments, Logger logger) {
+        this.payments = payments;
+        this.logger = logger;
+        for (var record : payments.pending().values()) {
+            recoveryPlayers.add(UUID.fromString(record.getProperty("owner")));
+            recoveryPlayers.add(UUID.fromString(record.getProperty("other")));
+        }
         this.economy = economy;
         this.escrow = escrow;
         this.log = log;
@@ -61,10 +75,13 @@ public final class TradeManager {
     }
 
     public boolean inTrade(Player player) {
-        return byPlayer.containsKey(player.getUniqueId());
+        return recoveryPlayers.contains(player.getUniqueId()) || byPlayer.containsKey(player.getUniqueId());
     }
 
+    public boolean needsRecovery(Player player) { return recoveryPlayers.contains(player.getUniqueId()); }
+
     public TradeSession open(Player first, Player second) {
+        if (inTrade(first) || inTrade(second)) throw new IllegalStateException("Player already trading or held for recovery");
         TradeSession session = new TradeSession(first, second, System.currentTimeMillis());
         UUID id = UUID.randomUUID();
         byId.put(id, session);
@@ -89,9 +106,10 @@ public final class TradeManager {
     }
 
     private void forget(TradeSession session) {
-        UUID id = ids.remove(session);
+        UUID id = ids.get(session);
         if (id != null) {
             escrow.release(id);
+            ids.remove(session);
             byId.remove(id);
         }
         byPlayer.remove(session.a().playerId());
@@ -131,7 +149,7 @@ public final class TradeManager {
      * where someone else could take it.
      */
     public void cancel(TradeSession session) {
-        if (session.finished()) {
+        if (session.finished() || session.state() == TradeSession.State.RECOVERY) {
             return;
         }
         session.markCancelled();
@@ -162,13 +180,11 @@ public final class TradeManager {
     /**
      * Move the goods. One block, no yielding.
      *
-     * <p>Order matters: verify everything, then take money from both, then hand out. Money is taken
-     * before items are given because a withdrawal is the only step that can still fail for a reason
-     * we cannot see in advance — a balance changed by another plugin in the same tick. If the second
-     * withdrawal fails the first is refunded and nothing else has happened yet.
+     * <p>Both debits and credits must be confirmed before item delivery. A rejected second debit
+     * can abort only after its refund succeeds. Partial/unknown outcomes hold escrow for operators.
      */
     public Failure commit(TradeSession session) {
-        if (session.state() != TradeSession.State.SETTLING) {
+        if (session.state() != TradeSession.State.SETTLING || !ids.containsKey(session)) {
             return Failure.NOT_SETTLING;
         }
 
@@ -191,38 +207,65 @@ public final class TradeManager {
             return Failure.NO_INVENTORY_SPACE;
         }
 
-        // --- mutation ------------------------------------------------------
-        if (coinsA > 0 && !economy.withdraw(pa, coinsA)) {
-            return Failure.ECONOMY_ERROR;
-        }
-        if (coinsB > 0 && !economy.withdraw(pb, coinsB)) {
-            if (coinsA > 0) {
-                economy.deposit(pa, coinsA);      // put the first one back; nothing else moved yet
-            }
-            return Failure.ECONOMY_ERROR;
-        }
-
-        List<ItemStack> toA = session.drainItems(session.b());
-        List<ItemStack> toB = session.drainItems(session.a());
-        give(pa, toA);
-        give(pb, toB);
-
-        if (coinsB > 0) {
-            economy.deposit(pa, coinsB);
-        }
-        if (coinsA > 0) {
-            economy.deposit(pb, coinsA);
-        }
-
-        session.markCompleted();
         UUID id = ids.get(session);
-        forget(session);
+        UUID attempt = UUID.randomUUID();
+        try {
+            persist(session);
+            payments.begin(attempt, pa.getUniqueId(), pb.getUniqueId(), "trade:" + id);
+        } catch (RuntimeException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Cannot persist trade intent; no payment attempted", e);
+            return Failure.ECONOMY_ERROR;
+        }
+        // Also blocks reentrant cancel/commit from a provider callback.
+        session.markRecovery();
+        List<ItemStack> toA;
+        List<ItemStack> toB;
+        try {
+            if (!payments.attempt(attempt, "debit-a", pa.getUniqueId(), coinsA, false,
+                    () -> economy.withdraw(pa, coinsA))) {
+                payments.complete(attempt);
+                session.resumeAfterRejectedPayment();
+                return Failure.ECONOMY_ERROR;
+            }
+            if (!payments.attempt(attempt, "debit-b", pb.getUniqueId(), coinsB, false,
+                    () -> economy.withdraw(pb, coinsB))) {
+                if (!payments.attempt(attempt, "refund-a", pa.getUniqueId(), coinsA, true,
+                        () -> economy.deposit(pa, coinsA))) return holdRecovery(session, attempt, null);
+                payments.complete(attempt);
+                session.resumeAfterRejectedPayment();
+                return Failure.ECONOMY_ERROR;
+            }
+            if (!payments.attempt(attempt, "credit-a", pa.getUniqueId(), coinsB, true,
+                    () -> economy.deposit(pa, coinsB))) return holdRecovery(session, attempt, null);
+            if (!payments.attempt(attempt, "credit-b", pb.getUniqueId(), coinsA, true,
+                    () -> economy.deposit(pb, coinsA))) return holdRecovery(session, attempt, null);
+
+            payments.delivering(attempt);
+            toA = session.drainItems(session.b());
+            toB = session.drainItems(session.a());
+            give(pa, toA);
+            give(pb, toB);
+            forget(session); // Strict escrow persistence must succeed before closing the receipt.
+            payments.complete(attempt);
+            session.markCompleted();
+        } catch (RuntimeException e) {
+            return holdRecovery(session, attempt, e);
+        }
 
         // Reporting is after the fact and must never affect the trade.
         log.record(id, pa, pb, toB, toA, coinsA, coinsB);
         econGuard.observe(pa, pb, coinsA, coinsB, toB.size(), toA.size());
         econGuard.observe(pb, pa, coinsB, coinsA, toA.size(), toB.size());
         return Failure.NONE;
+    }
+
+    private Failure holdRecovery(TradeSession session, UUID attempt, RuntimeException cause) {
+        session.markRecovery();
+        recoveryPlayers.add(session.a().playerId());
+        recoveryPlayers.add(session.b().playerId());
+        logger.log(java.util.logging.Level.SEVERE, "Trade held for payment reconciliation. Receipt "
+                + attempt + "; session " + ids.get(session) + ". Do not automatically retry or return escrow.", cause);
+        return Failure.RECOVERY_REQUIRED;
     }
 
     /**

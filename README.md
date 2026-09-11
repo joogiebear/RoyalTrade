@@ -32,15 +32,16 @@ player has to notice something is wrong.
 only way to stop the same item being offered in two trades at once — a design that merely *points* at
 inventory slots cannot.
 
-**One synchronous commit.** Verify both sides still have everything, check both have room, take both
-payments, hand out both halves. All in a single main-thread block: no scheduling, no async economy
-call, nothing that can interleave. Every reason a trade can fail is checked *before* the first
-mutation, so once goods start moving the transfer runs to the end.
+**One synchronous settlement.** Both debits and both recipient credits must succeed before items are
+handed over. Each payment leg has a persisted receipt. A rejected first debit, or a rejected second
+debit with a confirmed refund, can return to the normal confirmation flow. Failed refunds, partial
+credits, and unknown provider outcomes hold the trade for staff reconciliation instead of completing
+it or charging again.
 
-**Escrow survives a crash.** While a trade is open the items are in nobody's inventory. If the
-process dies there, they exist only in memory. So escrow is written to disk on every change and
-cleared once the items are somewhere real again; anything still on disk at boot is returned to its
-owner on their next login.
+**Escrow and recovery.** Open offers are written to disk on each change. Ordinary interrupted offers
+return on next login; offers belonging to an unresolved payment remain held, including after restart.
+Both participants are blocked from new trades until staff reconcile the payment and item records.
+See [payment recovery](docs/payment-recovery.md) before clearing a hold or rolling back plugin versions.
 
 ---
 

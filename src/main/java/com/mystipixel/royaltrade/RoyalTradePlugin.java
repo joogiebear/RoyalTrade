@@ -59,14 +59,31 @@ public final class RoyalTradePlugin extends JavaPlugin {
         log = new TradeLog(getDataFolder(), getLogger());
         toggles = new com.mystipixel.royaltrade.data.TradeToggles(getDataFolder(), getLogger());
 
-        int recovered = escrow.load();
+        com.mystipixel.royaltrade.data.PaymentJournal payments;
+        int recovered;
+        try {
+            payments = new com.mystipixel.royaltrade.data.PaymentJournal(getDataFolder().toPath().resolve("payments"));
+            java.util.Set<java.util.UUID> heldSessions = new java.util.HashSet<>();
+            for (var record : payments.pending().values()) {
+                String reason = record.getProperty("reason");
+                if (!reason.startsWith("trade:")) throw new IllegalStateException("Invalid trade receipt reason");
+                heldSessions.add(java.util.UUID.fromString(reason.substring("trade:".length())));
+            }
+            recovered = escrow.load(heldSessions);
+            if (!heldSessions.isEmpty()) getLogger().severe(heldSessions.size()
+                    + " trade(s) held for payment reconciliation. See payments/pending and docs/payment-recovery.md.");
+        } catch (RuntimeException e) {
+            getLogger().log(java.util.logging.Level.SEVERE, "Cannot load payment/escrow state safely; disabling", e);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
         if (recovered > 0) {
             getLogger().warning(recovered + " player(s) had items escrowed when the server last "
                     + "stopped. They will be returned on their next join.");
         }
 
         econGuard = new EconGuardHook();
-        trades = new TradeManager(economy, escrow, log, econGuard);
+        trades = new TradeManager(economy, escrow, log, econGuard, payments, getLogger());
         gui = new TradeGui(economy, this::settleMillis);
         signInput = new SignInput(this);
 
@@ -165,6 +182,12 @@ public final class RoyalTradePlugin extends JavaPlugin {
             }
             // Anything that stops a commit puts the trade back in players' hands rather than
             // silently dropping it — they can fix the problem and confirm again.
+            if (failure == TradeManager.Failure.RECOVERY_REQUIRED) {
+                closeBoth(a, b);
+                if (a != null) messages.send(a, "payment-recovery");
+                if (b != null) messages.send(b, "payment-recovery");
+                continue;
+            }
             session.abortSettling();
             String key = switch (failure) {
                 case INSUFFICIENT_FUNDS -> "not-enough-money";

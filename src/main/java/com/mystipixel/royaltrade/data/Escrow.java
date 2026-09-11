@@ -49,15 +49,18 @@ public final class Escrow {
      *
      * @return how many players are owed items, for the startup log
      */
-    public int load() {
+    public int load(java.util.Set<UUID> heldSessions) {
         if (!file.getParentFile().exists() && !file.getParentFile().mkdirs()) {
             logger.warning("Could not create the data folder — escrow will not survive a restart.");
         }
-        data = YamlConfiguration.loadConfiguration(file);
+        data = new YamlConfiguration();
+        try { if (file.exists()) data.load(file); }
+        catch (Exception e) { throw new IllegalStateException("Cannot read escrow safely", e); }
 
         int recovered = 0;
         if (data.isConfigurationSection(ESCROW)) {
             for (String sessionId : List.copyOf(data.getConfigurationSection(ESCROW).getKeys(false))) {
+                if (heldSessions.contains(UUID.fromString(sessionId))) continue;
                 String base = ESCROW + "." + sessionId;
                 for (String owner : data.getConfigurationSection(base).getKeys(false)) {
                     List<?> raw = data.getList(base + "." + owner, List.of());
@@ -68,12 +71,14 @@ public final class Escrow {
                         }
                     }
                     if (!items.isEmpty()) {
-                        queue(UUID.fromString(owner), items);
+                        List<ItemStack> existing = pendingFor(UUID.fromString(owner));
+                        existing.addAll(items);
+                        data.set(PENDING + "." + owner, existing);
                         recovered++;
                     }
                 }
+                data.set(base, null);
             }
-            data.set(ESCROW, null);
             save();
         }
         return recovered;
@@ -146,12 +151,25 @@ public final class Escrow {
     }
 
     private void save() {
+        java.nio.file.Path temporary = null;
         try {
-            data.save(file);
+            java.nio.file.Path target = file.toPath();
+            temporary = java.nio.file.Files.createTempFile(target.getParent(), ".escrow-", ".tmp");
+            byte[] bytes = data.saveToString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            try (var channel = java.nio.channels.FileChannel.open(temporary, java.nio.file.StandardOpenOption.WRITE)) {
+                java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
+                while (buffer.hasRemaining()) channel.write(buffer);
+                channel.force(true);
+            }
+            java.nio.file.Files.move(temporary, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            // Worth shouting about: from here on a crash loses whatever is escrowed.
-            logger.log(Level.SEVERE, "Could not write escrow.yml — items in open trades are now "
-                    + "at risk if the server stops uncleanly.", e);
+            logger.log(Level.SEVERE, "Cannot persist escrow; stopping this operation", e);
+            throw new java.io.UncheckedIOException(e);
+        } finally {
+            if (temporary != null) {
+                try { java.nio.file.Files.deleteIfExists(temporary); } catch (IOException ignored) { }
+            }
         }
     }
 }
