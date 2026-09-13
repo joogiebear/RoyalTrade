@@ -1,3 +1,8 @@
+## 2026.37.0 — 2026-09-13
+
+### 🐛 Fixes
+- retain unresolved payment settlements and prevent unsafe retries (`3780e1e`)
+
 ## 2026.36.1 — 2026-09-06
 
 ### 🐛 Fixes
