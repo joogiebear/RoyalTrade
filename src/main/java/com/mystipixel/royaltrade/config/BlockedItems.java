@@ -1,17 +1,13 @@
 package com.mystipixel.royaltrade.config;
 
+import com.mystipixel.royaltrade.util.ItemContents;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.block.Container;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.BlockStateMeta;
-import org.bukkit.inventory.meta.BundleMeta;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
@@ -100,24 +96,12 @@ public final class BlockedItems {
         if (depth >= MAX_DEPTH || stack == null || !stack.hasItemMeta()) {
             return false;
         }
-        for (ItemStack inner : contents(stack.getItemMeta())) {
+        for (ItemStack inner : ItemContents.of(stack.getItemMeta())) {
             if (inner != null && (blocked.test(inner) || contains(inner, blocked, depth + 1))) {
                 return true;
             }
         }
         return false;
-    }
-
-    /** What an item carries: a bundle's items, or a container block's snapshot inventory. */
-    private static List<ItemStack> contents(ItemMeta meta) {
-        if (meta instanceof BundleMeta bundle) {
-            return bundle.getItems();
-        }
-        if (meta instanceof BlockStateMeta states && states.hasBlockState()
-                && states.getBlockState() instanceof Container container) {
-            return Arrays.asList(container.getSnapshotInventory().getContents());
-        }
-        return List.of();
     }
 
     private boolean matchesItself(ItemStack stack) {
