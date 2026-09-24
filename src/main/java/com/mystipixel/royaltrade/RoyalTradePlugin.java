@@ -93,6 +93,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
             getCommand("trade").setExecutor(command);
             getCommand("trade").setTabCompleter(command);
         }
+        getServer().getPluginManager().registerEvents(command, this);
         getServer().getPluginManager().registerEvents(new TradeListener(this), this);
         getServer().getPluginManager().registerEvents(signInput, this);
 

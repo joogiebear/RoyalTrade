@@ -146,6 +146,30 @@ class TradeManagerTest {
         assertTrue(journal.pending().isEmpty());
     }
 
+    @Test void aSecondRequestDoesNotReplaceTheFirst() {
+        Player c = player("c");
+        manager.request(a, c, 60_000);
+        manager.request(b, c, 60_000);
+        assertTrue(manager.hasRequest(c, a, 60_000));
+        assertTrue(manager.hasRequest(c, b, 60_000));
+        manager.clearRequest(c, a);
+        assertFalse(manager.hasRequest(c, a, 60_000));
+        assertTrue(manager.hasRequest(c, b, 60_000));
+    }
+    @Test void expiredRequestsAreGone() throws InterruptedException {
+        Player c = player("c");
+        manager.request(a, c, 1);
+        Thread.sleep(5);
+        assertFalse(manager.hasRequest(c, a, 1));
+    }
+    @Test void aDepartingPlayersRequestsBothWaysAreForgotten() {
+        Player c = player("c");
+        manager.request(a, c, 60_000);
+        manager.request(c, b, 60_000);
+        manager.forgetRequests(c.getUniqueId());
+        assertFalse(manager.hasRequest(c, a, 60_000));
+        assertFalse(manager.hasRequest(b, c, 60_000));
+    }
     @Test void completionSavesBothInventoriesBeforeReleasingEscrow() {
         assertEquals(TradeManager.Failure.NONE, manager.commit(session));
         InOrder order = inOrder(b.getInventory(), a, b, escrow);

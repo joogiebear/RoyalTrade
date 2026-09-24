@@ -51,8 +51,11 @@ public final class TradeManager {
     private final Map<UUID, TradeSession> byPlayer = new HashMap<>();
     private final Map<UUID, TradeSession> byId = new HashMap<>();
     private final Map<TradeSession, UUID> ids = new HashMap<>();
-    private final Map<UUID, UUID> requests = new HashMap<>();      // target -> requester
-    private final Map<UUID, Long> requestedAt = new HashMap<>();
+    /**
+     * target -> (requester -> when sent). Several per target: a second player asking must not
+     * silently wipe out the first request, which the first player still believes is waiting.
+     */
+    private final Map<UUID, Map<UUID, Long>> requests = new HashMap<>();
 
     public TradeManager(EconomyHook economy, Escrow escrow, TradeLog log, EconGuardHook econGuard,
                         PaymentJournal payments, Logger logger) {
@@ -150,27 +153,51 @@ public final class TradeManager {
 
     // ------------------------------------------------------------------ requests
 
-    public void request(Player from, Player to) {
-        requests.put(to.getUniqueId(), from.getUniqueId());
-        requestedAt.put(to.getUniqueId(), System.currentTimeMillis());
+    public void request(Player from, Player to, long expiryMillis) {
+        pruneExpired(to.getUniqueId(), expiryMillis);
+        requests.computeIfAbsent(to.getUniqueId(), k -> new HashMap<>())
+                .put(from.getUniqueId(), System.currentTimeMillis());
     }
 
-    public UUID pendingRequest(Player target, long expiryMillis) {
-        UUID requester = requests.get(target.getUniqueId());
-        if (requester == null) {
-            return null;
-        }
-        Long at = requestedAt.get(target.getUniqueId());
-        if (at == null || System.currentTimeMillis() - at > expiryMillis) {
-            clearRequest(target);
-            return null;
-        }
-        return requester;
+    /** Whether {@code requester} has a live request waiting on {@code target}. */
+    public boolean hasRequest(Player target, Player requester, long expiryMillis) {
+        pruneExpired(target.getUniqueId(), expiryMillis);
+        Map<UUID, Long> waiting = requests.get(target.getUniqueId());
+        return waiting != null && waiting.containsKey(requester.getUniqueId());
     }
 
-    public void clearRequest(Player target) {
-        requests.remove(target.getUniqueId());
-        requestedAt.remove(target.getUniqueId());
+    public void clearRequest(Player target, Player requester) {
+        Map<UUID, Long> waiting = requests.get(target.getUniqueId());
+        if (waiting != null) {
+            waiting.remove(requester.getUniqueId());
+            if (waiting.isEmpty()) {
+                requests.remove(target.getUniqueId());
+            }
+        }
+    }
+
+    /**
+     * Drop every request a departing player sent or was sent. Neither can be answered once they
+     * have gone, and without this the map keeps an entry for everyone who ever logged in.
+     */
+    public void forgetRequests(UUID player) {
+        requests.remove(player);
+        requests.values().removeIf(waiting -> {
+            waiting.remove(player);
+            return waiting.isEmpty();
+        });
+    }
+
+    private void pruneExpired(UUID target, long expiryMillis) {
+        Map<UUID, Long> waiting = requests.get(target);
+        if (waiting == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        waiting.values().removeIf(at -> now - at > expiryMillis);
+        if (waiting.isEmpty()) {
+            requests.remove(target);
+        }
     }
 
     // ------------------------------------------------------------------ cancel

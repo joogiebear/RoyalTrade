@@ -8,6 +8,9 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -22,7 +25,7 @@ import java.util.UUID;
  * did, so there is no "accept" command to remember, and no window where a stray /accept lands on a
  * trade the player did not mean to join.
  */
-public final class TradeCommand implements CommandExecutor, TabCompleter {
+public final class TradeCommand implements CommandExecutor, TabCompleter, Listener {
 
     private final RoyalTradePlugin plugin;
     private final Map<UUID, Long> lastRequest = new HashMap<>();
@@ -86,9 +89,8 @@ public final class TradeCommand implements CommandExecutor, TabCompleter {
         }
 
         // Already invited by this player? Then this is the acceptance.
-        UUID pending = plugin.trades().pendingRequest(player, plugin.requestExpiryMillis());
-        if (pending != null && pending.equals(target.getUniqueId())) {
-            plugin.trades().clearRequest(player);
+        if (plugin.trades().hasRequest(player, target, plugin.requestExpiryMillis())) {
+            plugin.trades().clearRequest(player, target);
             TradeSession session = plugin.trades().open(player, target);
             plugin.gui().open(session, player, target);
             plugin.messages().send(player, "opened", Map.of("player", target.getName()));
@@ -111,10 +113,18 @@ public final class TradeCommand implements CommandExecutor, TabCompleter {
         }
         lastRequest.put(player.getUniqueId(), now);
 
-        plugin.trades().request(player, target);
+        plugin.trades().request(player, target, plugin.requestExpiryMillis());
         plugin.messages().send(player, "request-sent", Map.of("player", target.getName()));
         plugin.messages().send(target, "request-received", Map.of("player", player.getName()));
         return true;
+    }
+
+    /** Forget a departing player's cooldown and requests, so neither map grows for good. */
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        lastRequest.remove(id);
+        plugin.trades().forgetRequests(id);
     }
 
     /** Distance and world limits. Both are anti-RMT levers as much as convenience ones. */
