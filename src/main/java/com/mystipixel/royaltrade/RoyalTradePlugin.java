@@ -125,6 +125,9 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (signInput != null) {
+            signInput.shutdown();
+        }
         // Cancel every open trade rather than let the shutdown strand escrowed items. Cancelling
         // returns them to inventories where possible and queues the rest, so nothing is left only in
         // memory when the process exits.

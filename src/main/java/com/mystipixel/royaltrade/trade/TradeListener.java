@@ -1,6 +1,7 @@
 package com.mystipixel.royaltrade.trade;
 
 import com.mystipixel.royaltrade.RoyalTradePlugin;
+import com.mystipixel.royaltrade.gui.SignInput;
 import com.mystipixel.royaltrade.gui.TradeGui;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -261,7 +262,21 @@ public final class TradeListener implements Listener {
     private void applyCoins(Player player, String typed) {
         awaitingCoins.remove(player.getUniqueId());
         TradeSession session = plugin.trades().sessionOf(player);
-        if (session == null || !session.editable()) {
+        if (session == null) {
+            return;
+        }
+        if (typed == null && !SignInput.showingOwnInventory(player)) {
+            // The prompt was displaced by another menu. That is leaving the trade window as surely
+            // as closing it is, so it ends the trade the same way instead of dragging them back.
+            cancel(session, player, true);
+            return;
+        }
+        if (!session.editable()) {
+            // Both sides confirmed while this player was at the sign. The amount is moot, but they
+            // still belong in the window to watch it settle — or to fix things if it fails.
+            if (session.state() == TradeSession.State.SETTLING) {
+                reopen(player, session);
+            }
             return;
         }
         TradeSession.Side side = session.sideOf(player.getUniqueId());
@@ -329,11 +344,14 @@ public final class TradeListener implements Listener {
             if (p == null) {
                 continue;
             }
-            plugin.gui().forget(p);
-            if (p.getOpenInventory() != null) {
+            // Only close the trade window itself. Anything else on screen — another plugin's menu
+            // that displaced the coin prompt — is theirs, and flagging a close that never comes
+            // would leave expectedClose set to swallow the next trade window's real close.
+            if (plugin.gui().isTradeView(p, p.getOpenInventory().getTopInventory())) {
                 expectedClose.add(p.getUniqueId());
                 p.closeInventory();
             }
+            plugin.gui().forget(p);
             if (p.equals(actor)) {
                 if (tellActor) {
                     plugin.messages().send(p, "cancelled");
