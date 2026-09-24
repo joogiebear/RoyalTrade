@@ -92,7 +92,11 @@ treated as free.
 more here than anywhere else in the suite: EconGuard watches for wealth moving to young accounts and
 for unusual velocity, which is the shape real-money trading and alt-funnelling make. Player-to-player
 trade is the most direct way to move wealth between accounts, so a trade plugin that does not report
-is the hole every other check gets routed around.
+is the hole every other check gets routed around. Each record names the items that changed hands, so
+an item-for-item trade, which carries no coin amount, still shows what moved.
+
+When EconGuard's `enforcement.block-flagged-trades` is on, a flagged player cannot send, accept or
+complete a trade. The other player is only told they can't trade with that person right now.
 
 ---
 

@@ -37,7 +37,9 @@ public final class TradeManager {
         INSUFFICIENT_FUNDS,
         NO_INVENTORY_SPACE,
         ECONOMY_ERROR,
-        RECOVERY_REQUIRED
+        RECOVERY_REQUIRED,
+        /** EconGuard's veto refused one of the players. */
+        RESTRICTED
     }
 
     private final PaymentJournal payments;
@@ -258,6 +260,11 @@ public final class TradeManager {
         double coinsB = session.b().coins();
 
         // --- checks, all before any mutation -------------------------------
+        // Asked again here, not just at request time: a player can be flagged mid-trade, and this
+        // is the last point at which nothing has moved.
+        if (!econGuard.allow(pa) || !econGuard.allow(pb)) {
+            return Failure.RESTRICTED;
+        }
         if (!economy.has(pa, coinsA) || !economy.has(pb, coinsB)) {
             return Failure.INSUFFICIENT_FUNDS;
         }
@@ -318,8 +325,8 @@ public final class TradeManager {
 
         // Reporting is after the fact and must never affect the trade.
         log.record(id, pa, pb, toB, toA, coinsA, coinsB);
-        econGuard.observe(pa, pb, coinsA, coinsB, toB.size(), toA.size());
-        econGuard.observe(pb, pa, coinsB, coinsA, toA.size(), toB.size());
+        econGuard.observe(pa, pb, coinsA, coinsB, toB, toA);
+        econGuard.observe(pb, pa, coinsB, coinsA, toA, toB);
         return Failure.NONE;
     }
 

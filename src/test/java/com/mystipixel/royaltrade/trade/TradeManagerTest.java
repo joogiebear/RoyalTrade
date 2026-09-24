@@ -43,6 +43,7 @@ class TradeManagerTest {
         when(economy.has(any(), anyDouble())).thenReturn(true);
         when(economy.withdraw(any(), anyDouble())).thenReturn(true);
         when(economy.deposit(any(), anyDouble())).thenReturn(true);
+        when(guard.allow(any())).thenReturn(true);
         session = manager.open(a, b);
         session.setCoins(session.a(), 10); session.setCoins(session.b(), 20);
         ItemStack item = mock(ItemStack.class);
@@ -72,7 +73,8 @@ class TradeManagerTest {
         assertFalse(session.finished());
         assertEquals(1, session.a().offered().size());
         verify(b.getInventory(), never()).addItem(any(ItemStack[].class));
-        verifyNoInteractions(log, guard);
+        verifyNoInteractions(log);
+        verify(guard, never()).observe(any(), any(), anyDouble(), anyDouble(), anyList(), anyList());
     }
     @Test void failedRefundCannotBeRetriedAsANewChargeOrCancelledForItems() {
         when(economy.withdraw(b, 20)).thenReturn(false);
@@ -146,6 +148,19 @@ class TradeManagerTest {
         assertTrue(journal.pending().isEmpty());
     }
 
+    @Test void econGuardVetoStopsTheTradeBeforeAnythingMoves() {
+        when(guard.allow(b)).thenReturn(false);
+        assertEquals(TradeManager.Failure.RESTRICTED, manager.commit(session));
+        verify(economy, never()).withdraw(any(), anyDouble());
+        verify(b.getInventory(), never()).addItem(any(ItemStack[].class));
+        assertTrue(journal.pending().isEmpty());
+        assertEquals(1, session.a().offered().size());
+    }
+    @Test void completedTradeIsReportedWithTheItemsEachSideGave() {
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        verify(guard).observe(eq(a), eq(b), eq(10.0), eq(20.0), argThat(l -> l.size() == 1), argThat(List::isEmpty));
+        verify(guard).observe(eq(b), eq(a), eq(20.0), eq(10.0), argThat(List::isEmpty), argThat(l -> l.size() == 1));
+    }
     @Test void aSecondRequestDoesNotReplaceTheFirst() {
         Player c = player("c");
         manager.request(a, c, 60_000);

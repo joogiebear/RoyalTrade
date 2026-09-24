@@ -207,9 +207,12 @@ public final class RoyalTradePlugin extends JavaPlugin {
                 case NO_INVENTORY_SPACE -> "full-inventory";
                 case ECONOMY_ERROR -> "economy-error";
                 case OFFLINE -> "other-left";
+                case RESTRICTED -> "trade-restricted";
                 default -> "cancelled";
             };
-            if (failure == TradeManager.Failure.OFFLINE) {
+            // A restriction will not clear by confirming again, so it ends the trade like a
+            // departure does rather than leaving both players retrying against it.
+            if (failure == TradeManager.Failure.OFFLINE || failure == TradeManager.Failure.RESTRICTED) {
                 trades.cancel(session);
                 closeBoth(a, b);
             } else {
@@ -251,6 +254,10 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
     public TradeManager trades() {
         return trades;
+    }
+
+    public EconGuardHook econGuard() {
+        return econGuard;
     }
 
     public TradeGui gui() {

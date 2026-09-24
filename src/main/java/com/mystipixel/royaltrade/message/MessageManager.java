@@ -68,6 +68,11 @@ public final class MessageManager {
                         + "inventory.");
         DEFAULTS.put("returned-partial",
                 "&eSome items from an interrupted trade did not fit. Make room and rejoin.");
+        DEFAULTS.put("trade-restricted-self",
+                "&cYour account can't trade right now. Contact staff if you think this is a mistake.");
+        DEFAULTS.put("trade-restricted-other", "&cYou can't trade with {player} right now.");
+        DEFAULTS.put("trade-restricted",
+                "&cThis trade can't go ahead right now, so it was cancelled. Your items have been returned.");
         DEFAULTS.put("reloaded", "&aRoyalTrade reloaded.");
     }
 

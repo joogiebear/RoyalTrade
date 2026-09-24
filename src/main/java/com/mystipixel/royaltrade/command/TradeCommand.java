@@ -87,6 +87,16 @@ public final class TradeCommand implements CommandExecutor, TabCompleter, Listen
         if (tooNew(player, player, "too-new") || tooNew(player, target, "they-are-too-new")) {
             return true;
         }
+        // EconGuard's veto, on both the request and the acceptance. The other player is told only
+        // that they cannot trade with this person, not why — a flag is staff business.
+        if (!plugin.econGuard().allow(player)) {
+            plugin.messages().send(player, "trade-restricted-self");
+            return true;
+        }
+        if (!plugin.econGuard().allow(target)) {
+            plugin.messages().send(player, "trade-restricted-other", Map.of("player", target.getName()));
+            return true;
+        }
 
         // Already invited by this player? Then this is the acceptance.
         if (plugin.trades().hasRequest(player, target, plugin.requestExpiryMillis())) {
