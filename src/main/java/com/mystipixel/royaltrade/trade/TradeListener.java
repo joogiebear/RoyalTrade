@@ -132,6 +132,9 @@ public final class TradeListener implements Listener {
                 for (ItemStack stack : leftover.values()) {
                     player.getWorld().dropItemNaturally(player.getLocation(), stack);
                 }
+                // Inventory before escrow when an item comes out: a crash in between then leaves a
+                // copy in both, never in neither.
+                plugin.trades().saveInventory(player);
                 afterChange(session, player, hadConfirmation);
             }
         }

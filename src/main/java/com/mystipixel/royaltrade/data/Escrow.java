@@ -133,6 +133,14 @@ public final class Escrow {
         }
         Map<Integer, ItemStack> leftover =
                 player.getInventory().addItem(owed.toArray(new ItemStack[0]));
+        // Save the inventory before shrinking the debt, so a crash in between re-delivers rather
+        // than leaving the items in neither place.
+        try {
+            player.saveData();
+        } catch (RuntimeException e) {
+            logger.log(Level.WARNING, "Could not save " + player.getName() + "'s data after "
+                    + "returning escrow; a crash before the next autosave may return it again.", e);
+        }
         List<ItemStack> still = new ArrayList<>(leftover.values());
         data.set(PENDING + "." + player.getUniqueId(), still.isEmpty() ? null : still);
         save();

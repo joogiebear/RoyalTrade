@@ -95,7 +95,16 @@ public final class TradeManager {
         return ids.get(session);
     }
 
-    /** Persist a side's escrow after any change to it. */
+    /**
+     * Persist a side's escrow after any change to it, then the players' own saves.
+     *
+     * <p>Escrow is on disk the moment it changes, but a player's inventory is only written at the
+     * next autosave. Left like that, a crash after an item moved into escrow restores it twice: once
+     * from the stale player save and once from escrow on the next join. So both are written, escrow
+     * first — a crash between the two then costs nothing, where the other order could lose the item.
+     * An item coming <em>out</em> of escrow needs the reverse, so that caller saves the inventory
+     * first with {@link #saveInventory}.
+     */
     public void persist(TradeSession session) {
         UUID id = ids.get(session);
         if (id == null) {
@@ -103,6 +112,29 @@ public final class TradeManager {
         }
         escrow.hold(id, session.a().playerId(), session.a().offered());
         escrow.hold(id, session.b().playerId(), session.b().offered());
+        saveInventories(session);
+    }
+
+    /**
+     * Write a player's data to disk now, so their inventory agrees with escrow if the process dies.
+     * A failed save is logged, not thrown: it only reopens the crash window this narrows.
+     */
+    public void saveInventory(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        try {
+            player.saveData();
+        } catch (RuntimeException e) {
+            logger.log(java.util.logging.Level.WARNING, "Could not save " + player.getName()
+                    + "'s data after a trade change; a crash before the next autosave may disagree"
+                    + " with escrow.", e);
+        }
+    }
+
+    private void saveInventories(TradeSession session) {
+        saveInventory(Bukkit.getPlayer(session.a().playerId()));
+        saveInventory(Bukkit.getPlayer(session.b().playerId()));
     }
 
     private void forget(TradeSession session) {
@@ -155,6 +187,7 @@ public final class TradeManager {
         session.markCancelled();
         returnEscrow(session, session.a());
         returnEscrow(session, session.b());
+        saveInventories(session);   // before escrow is released — see persist()
         forget(session);
     }
 
@@ -245,6 +278,10 @@ public final class TradeManager {
             toB = session.drainItems(session.a());
             give(pa, toA);
             give(pb, toB);
+            // Before escrow is released, so a crash cannot leave a player with the stale save's
+            // copy of what they just handed over as well as what they received.
+            saveInventory(pa);
+            saveInventory(pb);
             forget(session); // Strict escrow persistence must succeed before closing the receipt.
             payments.complete(attempt);
             session.markCompleted();

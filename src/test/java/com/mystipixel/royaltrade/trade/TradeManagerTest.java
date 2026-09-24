@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.InOrder;
 import org.mockito.MockedStatic;
 import java.nio.file.Path;
 import java.util.*;
@@ -143,6 +144,34 @@ class TradeManagerTest {
         assertEquals(TradeManager.Failure.NOT_SETTLING, manager.commit(unregistered));
         verifyNoInteractions(economy);
         assertTrue(journal.pending().isEmpty());
+    }
+
+    @Test void completionSavesBothInventoriesBeforeReleasingEscrow() {
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        InOrder order = inOrder(b.getInventory(), a, b, escrow);
+        order.verify(b.getInventory()).addItem(any(ItemStack[].class));
+        order.verify(a).saveData();
+        order.verify(b).saveData();
+        order.verify(escrow).release(any());
+    }
+    @Test void cancelSavesTheReturnedInventoryBeforeReleasingEscrow() {
+        manager.cancel(session);
+        InOrder order = inOrder(a.getInventory(), a, escrow);
+        order.verify(a.getInventory()).addItem(any(ItemStack[].class));
+        order.verify(a).saveData();
+        order.verify(escrow).release(any());
+    }
+    @Test void persistWritesEscrowBeforeThePlayerSave() {
+        UUID aId = a.getUniqueId();
+        manager.persist(session);
+        InOrder order = inOrder(escrow, a);
+        order.verify(escrow).hold(any(), eq(aId), anyList());
+        order.verify(a).saveData();
+    }
+    @Test void aFailedPlayerSaveDoesNotFailTheTrade() {
+        doThrow(new IllegalStateException("disk full")).when(a).saveData();
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        assertEquals(TradeSession.State.COMPLETED, session.state());
     }
 
 }
