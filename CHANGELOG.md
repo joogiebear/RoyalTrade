@@ -1,3 +1,26 @@
+## 2026.39.1 — 2026-09-24
+
+### ✨ Features
+- honour the trade veto and name traded items in the ledger (`0c0d2c1`)
+
+### 🐛 Fixes
+- keep ledger item text safe for latin1 MySQL tables (`d604c99`)
+- save toggles.yml through a temp file and atomic move (`56e448c`)
+- record enchantments and container contents in trades.log (`10e279f`)
+- keep every pending request and forget them on quit (`8b7ea56`)
+- tie expected-close flags to the window they were set for (`7cc1b97`)
+- refuse confirmations for a moment after either offer changes (`d313d87`)
+- end coin prompts whose answer can never arrive (`0545ef2`)
+- search shulker boxes and bundles for blocked items (`a9ccaf6`)
+- save player data around escrow so a crash cannot duplicate items (`57401ba`)
+- keep the sign prompt off block entities and blocks already in use (`31cb61e`)
+
+### ⚡ Performance
+- write both sides of a change in one flush (`5b0a009`)
+
+### 📝 Documentation
+- add MIT license (`0ee2d4a`)
+
 ## 2026.39.0 — 2026-09-23
 
 ### 🔧 Other
