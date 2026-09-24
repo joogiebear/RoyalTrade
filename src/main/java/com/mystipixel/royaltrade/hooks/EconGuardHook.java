@@ -98,7 +98,13 @@ public final class EconGuardHook {
         // ledger at all.
         String items = "gave " + TradeLog.describe(given) + "; got " + TradeLog.describe(got);
         if (items.length() > ITEM_LIMIT) {
-            items = items.substring(0, ITEM_LIMIT - 1) + "…";
+            // ASCII marker and a cut on a code point boundary: a stray non-Latin character or half a
+            // surrogate pair fails the insert on a latin1/utf8mb3 MySQL, which rolls back the whole batch.
+            int cut = ITEM_LIMIT - 3;
+            if (Character.isHighSurrogate(items.charAt(cut - 1))) {
+                cut--;
+            }
+            items = items.substring(0, cut) + "...";
         }
         try {
             bridge.invoke(null, player.getUniqueId(), player.getName(), SOURCE, "trade",
