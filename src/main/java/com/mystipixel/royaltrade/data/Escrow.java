@@ -84,10 +84,15 @@ public final class Escrow {
         return recovered;
     }
 
-    /** Record (or replace) what one player currently has escrowed in one session. */
-    public void hold(UUID sessionId, UUID playerId, List<ItemStack> items) {
-        String path = ESCROW + "." + sessionId + "." + playerId;
-        data.set(path, items.isEmpty() ? null : new ArrayList<>(items));
+    /**
+     * Record (or replace) what each player currently has escrowed in one session, in one write.
+     * Every save rewrites and flushes the whole file, so a change costs one flush, not one per side.
+     */
+    public void hold(UUID sessionId, Map<UUID, List<ItemStack>> offers) {
+        for (Map.Entry<UUID, List<ItemStack>> offer : offers.entrySet()) {
+            String path = ESCROW + "." + sessionId + "." + offer.getKey();
+            data.set(path, offer.getValue().isEmpty() ? null : new ArrayList<>(offer.getValue()));
+        }
         save();
     }
 

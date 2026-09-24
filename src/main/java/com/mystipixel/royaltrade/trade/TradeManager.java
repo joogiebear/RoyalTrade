@@ -110,8 +110,8 @@ public final class TradeManager {
         if (id == null) {
             return;
         }
-        escrow.hold(id, session.a().playerId(), session.a().offered());
-        escrow.hold(id, session.b().playerId(), session.b().offered());
+        escrow.hold(id, Map.of(session.a().playerId(), session.a().offered(),
+                session.b().playerId(), session.b().offered()));
         saveInventories(session);
     }
 

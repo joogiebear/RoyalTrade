@@ -162,11 +162,11 @@ class TradeManagerTest {
         order.verify(escrow).release(any());
     }
     @Test void persistWritesEscrowBeforeThePlayerSave() {
-        UUID aId = a.getUniqueId();
         manager.persist(session);
         InOrder order = inOrder(escrow, a);
-        order.verify(escrow).hold(any(), eq(aId), anyList());
+        order.verify(escrow).hold(any(), anyMap());
         order.verify(a).saveData();
+        verify(escrow, times(1)).hold(any(), anyMap());      // one flush for both sides
     }
     @Test void aFailedPlayerSaveDoesNotFailTheTrade() {
         doThrow(new IllegalStateException("disk full")).when(a).saveData();
