@@ -2,15 +2,21 @@ package com.mystipixel.royaltrade.config;
 
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.block.Container;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BlockStateMeta;
+import org.bukkit.inventory.meta.BundleMeta;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 /**
@@ -20,6 +26,9 @@ import java.util.logging.Logger;
  * ({@code ecoitems:soulbound_blade}). Eco ids are matched by reading the item's persistent-data
  * identity tag directly — the same keys RoyalBank's upgrade costs read — so no eco dependency is
  * needed and the check works whether or not the eco suite is installed.
+ *
+ * <p>Shulker boxes, bundles and other containers are searched too, since otherwise any entry is
+ * bypassed by packing the item in one.
  */
 public final class BlockedItems {
 
@@ -55,8 +64,63 @@ public final class BlockedItems {
         return new BlockedItems(materials, List.copyOf(ecoIds));
     }
 
-    /** Whether this stack may not be offered. */
-    public boolean matches(ItemStack stack) {
+    /** Why a stack may not be offered. */
+    public enum Match {
+        /** Nothing blocked. */
+        NONE,
+        /** The stack itself is on the list. */
+        ITEM,
+        /** Something inside it is — a shulker box or bundle carrying a blocked item. */
+        CONTENTS
+    }
+
+    /**
+     * How deep to look inside containers. Vanilla stops a shulker box holding another one, but a
+     * bundle can sit in a shulker box and bundles can nest, so one level is not enough; a cap still
+     * bounds the work on a hand-crafted item.
+     */
+    private static final int MAX_DEPTH = 8;
+
+    /** Whether this stack, or anything packed inside it, may not be offered. */
+    public Match check(ItemStack stack) {
+        if (materials.isEmpty() && ecoIds.isEmpty()) {
+            return Match.NONE;
+        }
+        if (matchesItself(stack)) {
+            return Match.ITEM;
+        }
+        return contains(stack, this::matchesItself, 0) ? Match.CONTENTS : Match.NONE;
+    }
+
+    /**
+     * Whether anything packed inside {@code stack} matches. Without this, the list is one shulker box
+     * away from meaningless: pack the soulbound blade in a box and the box is what gets checked.
+     */
+    static boolean contains(ItemStack stack, Predicate<ItemStack> blocked, int depth) {
+        if (depth >= MAX_DEPTH || stack == null || !stack.hasItemMeta()) {
+            return false;
+        }
+        for (ItemStack inner : contents(stack.getItemMeta())) {
+            if (inner != null && (blocked.test(inner) || contains(inner, blocked, depth + 1))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** What an item carries: a bundle's items, or a container block's snapshot inventory. */
+    private static List<ItemStack> contents(ItemMeta meta) {
+        if (meta instanceof BundleMeta bundle) {
+            return bundle.getItems();
+        }
+        if (meta instanceof BlockStateMeta states && states.hasBlockState()
+                && states.getBlockState() instanceof Container container) {
+            return Arrays.asList(container.getSnapshotInventory().getContents());
+        }
+        return List.of();
+    }
+
+    private boolean matchesItself(ItemStack stack) {
         if (stack == null || stack.getType().isAir()) {
             return false;
         }

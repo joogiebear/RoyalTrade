@@ -80,9 +80,16 @@ public final class TradeListener implements Listener {
             if (clicked == null || clicked.getType().isAir()) {
                 return;
             }
-            if (plugin.blockedItems().matches(clicked)) {
-                plugin.messages().send(player, "item-blocked");
-                return;
+            switch (plugin.blockedItems().check(clicked)) {
+                case ITEM -> {
+                    plugin.messages().send(player, "item-blocked");
+                    return;
+                }
+                case CONTENTS -> {
+                    plugin.messages().send(player, "item-blocked-inside");
+                    return;
+                }
+                case NONE -> { }
             }
             if (side.offered().size() >= TradeGui.MINE.length) {
                 return;                                   // window full; nothing to do
