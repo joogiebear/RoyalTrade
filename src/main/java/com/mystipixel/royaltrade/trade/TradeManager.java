@@ -106,9 +106,13 @@ public final class TradeManager {
      * <p>Escrow is on disk the moment it changes, but a player's inventory is only written at the
      * next autosave. Left like that, a crash after an item moved into escrow restores it twice: once
      * from the stale player save and once from escrow on the next join. So both are written, escrow
-     * first — a crash between the two then costs nothing, where the other order could lose the item.
-     * An item coming <em>out</em> of escrow needs the reverse, so that caller saves the inventory
-     * first with {@link #saveInventory}.
+     * first. A crash in the moment between the two writes still leaves a copy in both — a duplicate —
+     * but the other order would lose the item instead, and a duplicate is the lesser harm. An item
+     * coming <em>out</em> of escrow needs the reverse, so that caller saves the inventory first with
+     * {@link #saveInventory}.
+     *
+     * <p>These saves run on every offer change, on the main thread. They aren't batched: an escrow
+     * write held back behind a server autosave of the player could lose the item outright.
      */
     public void persist(TradeSession session) {
         UUID id = ids.get(session);
