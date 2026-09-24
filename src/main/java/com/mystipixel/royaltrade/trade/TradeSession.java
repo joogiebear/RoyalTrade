@@ -17,6 +17,9 @@ import java.util.UUID;
  *   <li><b>Any change clears both confirmations.</b> {@link #touch()} runs on every mutation, so a
  *       swapped item cannot ride in behind a confirmation the other player already gave. This is the
  *       single rule that matters; the rest are depth.</li>
+ *   <li><b>A confirm delay.</b> After any change, neither side can confirm for a moment. A
+ *       confirmation clicked against the old offer is still in flight when the change lands, so
+ *       without this it would be applied to terms the player never saw.</li>
  *   <li><b>A settle window.</b> Once both sides confirm, the trade freezes in {@link State#SETTLING}
  *       and refuses further edits. Without it, an edit landing in the same tick as the commit is a
  *       race, and races are how dupes happen.</li>
@@ -89,6 +92,7 @@ public final class TradeSession {
 
     private State state = State.ACTIVE;
     private long settlingSince;
+    private long changedAt;
 
     public TradeSession(Player first, Player second, long now) {
         this.a = new Side(first);
@@ -114,6 +118,23 @@ public final class TradeSession {
 
     public long settlingSince() {
         return settlingSince;
+    }
+
+    /** When either offer last changed, or 0 if neither has. */
+    public long changedAt() {
+        return changedAt;
+    }
+
+    /**
+     * Milliseconds until confirming is allowed again after the last change, or 0 if it is now.
+     *
+     * <p>Clearing confirmations on a change is not enough by itself: a player's confirm click is
+     * sent against what their screen showed, and if the other side swaps the offer while that click
+     * is on its way, the click arrives after the change and confirms the new terms. The settle
+     * window gives them a chance to notice, but it can be configured to zero. This delay cannot.
+     */
+    public long confirmBlockedFor(long now, long delayMillis) {
+        return changedAt == 0 ? 0 : Math.max(0, changedAt + delayMillis - now);
     }
 
     public Side sideOf(UUID playerId) {
@@ -147,6 +168,7 @@ public final class TradeSession {
     private void touch() {
         a.confirmed = false;
         b.confirmed = false;
+        changedAt = System.currentTimeMillis();
     }
 
     /** Escrow an item. Returns false if the trade is frozen, in which case the caller keeps it. */

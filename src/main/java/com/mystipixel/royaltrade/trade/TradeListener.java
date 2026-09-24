@@ -117,6 +117,12 @@ public final class TradeListener implements Listener {
                 plugin.gui().render(session);
                 return;
             }
+            long wait = session.confirmBlockedFor(System.currentTimeMillis(), plugin.confirmDelayMillis());
+            if (wait > 0) {
+                plugin.messages().send(player, "confirm-wait",
+                        Map.of("seconds", String.valueOf((wait + 999) / 1000)));
+                return;
+            }
             if (!session.confirm(side)) {
                 plugin.messages().send(player, "nothing-offered");
                 return;

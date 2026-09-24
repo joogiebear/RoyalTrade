@@ -55,11 +55,14 @@ public final class TradeGui {
 
     private final EconomyHook economy;
     private final java.util.function.LongSupplier settleMillis;
+    private final java.util.function.LongSupplier confirmDelayMillis;
     private final Map<UUID, Inventory> views = new HashMap<>();
 
-    public TradeGui(EconomyHook economy, java.util.function.LongSupplier settleMillis) {
+    public TradeGui(EconomyHook economy, java.util.function.LongSupplier settleMillis,
+                    java.util.function.LongSupplier confirmDelayMillis) {
         this.economy = economy;
         this.settleMillis = settleMillis;
+        this.confirmDelayMillis = confirmDelayMillis;
     }
 
     public Inventory viewOf(Player player) {
@@ -131,7 +134,11 @@ public final class TradeGui {
             long elapsed = System.currentTimeMillis() - session.settlingSince();
             secondsLeft = Math.max(1, (settleMillis.getAsLong() - elapsed + 999) / 1000);
         }
-        inv.setItem(MY_CONFIRM, confirmItem(viewer.confirmed(), true, settling, secondsLeft));
+        long blocked = session.confirmBlockedFor(System.currentTimeMillis(), confirmDelayMillis.getAsLong());
+        inv.setItem(MY_CONFIRM, settling || blocked <= 0
+                ? confirmItem(viewer.confirmed(), true, settling, secondsLeft)
+                : named(Material.ORANGE_DYE, "&6Offer changed — confirm in " + ((blocked + 999) / 1000) + "s",
+                        List.of("&7Check both sides before you confirm.")));
         inv.setItem(THEIR_CONFIRM, confirmItem(them.confirmed(), false, settling, secondsLeft));
         inv.setItem(CLOSE, named(Material.BARRIER, "&cCancel trade",
                 List.of("&7Nothing changes hands.", "&7Your items come straight back.")));

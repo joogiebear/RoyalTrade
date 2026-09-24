@@ -22,6 +22,12 @@
 # recommended: the pause is also the last chance either side has to notice.
 settle-seconds: 3
 
+# After either offer changes, how long before anyone can confirm. A confirm click
+# is sent against what the player's screen showed; without this delay, a click
+# already on its way when the other side swaps the offer would confirm the new
+# terms. Players see the countdown on their confirm button. Minimum 1.
+confirm-delay-seconds: 2
+
 # How long a trade request stays open before it expires.
 request-expiry-seconds: 60
 

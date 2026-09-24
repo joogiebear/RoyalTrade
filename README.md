@@ -23,6 +23,10 @@ Both confirmations clear, not just the one belonging to whoever made the change.
 confirmed agreed to a *specific* deal; the deal is now a different one, and their agreement should
 not survive it.
 
+**A confirm delay.** After any change, neither player can confirm for a couple of seconds. A confirm
+click is sent against what the screen showed, so without the delay a click already on its way when
+the other side swaps the offer would land on the new terms.
+
 **A settle window.** Once both sides confirm, the trade freezes for a few seconds and refuses edits
 entirely. It can only complete or be cancelled. Without it, an edit landing in the same tick as the
 commit is a race, and races are where duplication bugs live. The pause is also the last chance either
@@ -49,6 +53,7 @@ See [payment recovery](docs/payment-recovery.md) before clearing a hold or rolli
 
 ```yaml
 settle-seconds: 3            # freeze after both confirm, before the goods move
+confirm-delay-seconds: 2     # no confirming this long after any change (min 1)
 request-expiry-seconds: 60
 request-cooldown-seconds: 5
 

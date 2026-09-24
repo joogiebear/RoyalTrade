@@ -42,6 +42,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
     private com.mystipixel.royaltrade.config.BlockedItems blockedItems;
 
     private long settleMillis;
+    private long confirmDelayMillis;
     private long requestExpiryMillis;
     private long requestCooldownMillis;
     private double maxDistance;
@@ -84,7 +85,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
         econGuard = new EconGuardHook();
         trades = new TradeManager(economy, escrow, log, econGuard, payments, getLogger());
-        gui = new TradeGui(economy, this::settleMillis);
+        gui = new TradeGui(economy, this::settleMillis, this::confirmDelayMillis);
         signInput = new SignInput(this);
 
         TradeCommand command = new TradeCommand(this);
@@ -140,6 +141,9 @@ public final class RoyalTradePlugin extends JavaPlugin {
         blockedItems = com.mystipixel.royaltrade.config.BlockedItems.parse(
                 getConfig().getStringList("blocked-items"), getLogger());
         settleMillis = Math.max(0L, getConfig().getLong("settle-seconds", 3L) * 1000L);
+        // Floored at one second, not zero: this is what stops a confirmation sent against the old
+        // offer landing on the new one, so it is a protection, not a preference.
+        confirmDelayMillis = Math.max(1L, getConfig().getLong("confirm-delay-seconds", 2L)) * 1000L;
         requestExpiryMillis = Math.max(1L, getConfig().getLong("request-expiry-seconds", 60L)) * 1000L;
         requestCooldownMillis = Math.max(0L, getConfig().getLong("request-cooldown-seconds", 5L)) * 1000L;
         maxDistance = getConfig().getDouble("max-distance", -1.0);
@@ -163,6 +167,11 @@ public final class RoyalTradePlugin extends JavaPlugin {
     private void tickSettling() {
         long now = System.currentTimeMillis();
         for (TradeSession session : trades.active()) {
+            if (session.state() == TradeSession.State.ACTIVE
+                    && now - session.changedAt() < confirmDelayMillis + 1000L) {
+                gui.render(session);             // count the confirm delay down, then clear it
+                continue;
+            }
             if (session.state() != TradeSession.State.SETTLING) {
                 continue;
             }
@@ -261,6 +270,10 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
     public long settleMillis() {
         return settleMillis;
+    }
+
+    public long confirmDelayMillis() {
+        return confirmDelayMillis;
     }
 
     public long requestExpiryMillis() {

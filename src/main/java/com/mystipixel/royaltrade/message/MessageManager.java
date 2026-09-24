@@ -49,6 +49,7 @@ public final class MessageManager {
         DEFAULTS.put("completed", "&aTrade complete.");
         DEFAULTS.put("confirm-reset",
                 "&eThe offer changed, so both confirmations were cleared.");
+        DEFAULTS.put("confirm-wait", "&cThe offer just changed. Check it, then confirm in {seconds}s.");
         DEFAULTS.put("locked", "&cThe trade is settling and cannot be changed.");
         DEFAULTS.put("nothing-offered", "&cNeither of you has offered anything.");
         DEFAULTS.put("full-inventory", "&cThere is not enough room in one of your inventories.");
