@@ -4,6 +4,10 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -69,10 +73,26 @@ public final class TradeToggles {
             ids.add(id.toString());
         }
         out.set("blocking", ids);
+        // Written beside the real file and moved over it, so a crash mid-write leaves the old list
+        // rather than a truncated one that loads as "nobody is blocking" and silently re-opens
+        // everyone to the requests they switched off.
+        Path temporary = null;
         try {
-            out.save(file);
+            Path target = file.toPath();
+            Files.createDirectories(target.getParent());
+            temporary = Files.createTempFile(target.getParent(), ".toggles-", ".tmp");
+            Files.writeString(temporary, out.saveToString(), StandardCharsets.UTF_8);
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             logger.log(Level.WARNING, "Could not save toggles.yml — request toggles may reset on restart.", e);
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException ignored) {
+                    // a stray temp file is harmless
+                }
+            }
         }
     }
 }
