@@ -13,8 +13,10 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -34,8 +36,13 @@ public final class TradeListener implements Listener {
 
     private final RoyalTradePlugin plugin;
 
-    /** Players whose window we closed on purpose, so the close handler does not cancel the trade. */
-    private final Set<UUID> expectedClose = new HashSet<>();
+    /**
+     * Windows we closed on purpose, so the close handler does not cancel the trade. Keyed to the
+     * exact window rather than just the player: a flag whose close never came would otherwise sit
+     * there and swallow the close of a later trade's window, leaving that trade open with nobody
+     * looking at it.
+     */
+    private final Map<UUID, Inventory> expectedClose = new HashMap<>();
     /** Players at the coin sign, so closing the window for it does not cancel the trade. */
     private final Set<UUID> awaitingCoins = new HashSet<>();
 
@@ -200,7 +207,8 @@ public final class TradeListener implements Listener {
             return;
         }
         UUID id = player.getUniqueId();
-        if (expectedClose.remove(id) || awaitingCoins.contains(id)) {
+        Inventory expected = expectedClose.remove(id);
+        if ((expected != null && expected.equals(event.getInventory())) || awaitingCoins.contains(id)) {
             return;
         }
         TradeSession session = plugin.trades().sessionOf(player);
@@ -213,6 +221,7 @@ public final class TradeListener implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         TradeSession session = plugin.trades().sessionOf(event.getPlayer());
         awaitingCoins.remove(event.getPlayer().getUniqueId());
+        expectedClose.remove(event.getPlayer().getUniqueId());
         plugin.gui().forget(event.getPlayer());
         if (session != null && !session.finished()) {
             cancel(session, event.getPlayer(), false);
@@ -255,7 +264,10 @@ public final class TradeListener implements Listener {
             return;
         }
         awaitingCoins.add(player.getUniqueId());
-        expectedClose.add(player.getUniqueId());
+        Inventory view = plugin.gui().viewOf(player);
+        if (view != null) {
+            expectedClose.put(player.getUniqueId(), view);
+        }
         plugin.signInput().request(player,
                 List.of("^^^^^^^^^^^^^^^", "How many coins", "to offer?"),
                 typed -> applyCoins(player, typed));
@@ -353,8 +365,9 @@ public final class TradeListener implements Listener {
             // Only close the trade window itself. Anything else on screen — another plugin's menu
             // that displaced the coin prompt — is theirs, and flagging a close that never comes
             // would leave expectedClose set to swallow the next trade window's real close.
-            if (plugin.gui().isTradeView(p, p.getOpenInventory().getTopInventory())) {
-                expectedClose.add(p.getUniqueId());
+            Inventory top = p.getOpenInventory().getTopInventory();
+            if (plugin.gui().isTradeView(p, top)) {
+                expectedClose.put(p.getUniqueId(), top);
                 p.closeInventory();
             }
             plugin.gui().forget(p);
