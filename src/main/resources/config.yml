@@ -1,31 +1,14 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-#  RoyalTrade  ·  Configuration
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Player-to-player trading, built so that agreeing to a deal and then changing it
-#  cannot work.
+# RoyalTrade configuration
 #
-#  The protections are not optional and are not configurable, because a trade
-#  window with the safety turned off is worse than no trade window:
-#
-#    · Any change to either offer clears BOTH confirmations.
-#    · Once both sides confirm the trade freezes and cannot be edited.
-#    · Offered items leave the inventory and are held in escrow, so the same item
-#      cannot be offered in two trades at once.
-#    · Escrow is written to disk, so a crash returns items instead of eating them.
-#
-#  What you can tune is below.
-# ═══════════════════════════════════════════════════════════════════════════════
+# The trade protections (any change clears both confirmations, a frozen settle
+# window, crash-safe escrow) are always on. What you can tune is below.
 
-# How long the trade stays frozen after both sides confirm, before it completes.
-# This is the window that stops a last-instant edit racing the transfer. Players
-# see a countdown item while it runs. Zero completes immediately, which is not
-# recommended: the pause is also the last chance either side has to notice.
+# Seconds the trade stays frozen after both sides confirm, before it completes.
+# Players see a countdown. 0 completes immediately (not recommended).
 settle-seconds: 3
 
-# After either offer changes, how long before anyone can confirm. A confirm click
-# is sent against what the player's screen showed; without this delay, a click
-# already on its way when the other side swaps the offer would confirm the new
-# terms. Players see the countdown on their confirm button. Minimum 1.
+# Seconds after either offer changes before anyone can confirm, so a click
+# already in flight can't confirm the new terms. Minimum 1.
 confirm-delay-seconds: 2
 
 # How long a trade request stays open before it expires.
@@ -35,32 +18,19 @@ request-expiry-seconds: 60
 # spam someone's chat.
 request-cooldown-seconds: 5
 
-# ── Who may trade with whom ─────────────────────────────────────────────────
-# Both of these are anti-abuse settings as much as convenience ones: requiring
-# players to be near each other makes selling for real money less convenient,
-# because it stops being something you can do from anywhere.
-
 # Refuse trades between players in different worlds.
 same-world-only: true
 
 # Maximum distance in blocks. -1 disables the check.
 max-distance: -1
 
-# Items that may never be offered in a trade — quest items, soulbound gear,
-# seasonal rewards. Entries are material names (DRAGON_EGG) or eco-item ids
-# (ecoitems:soulbound_blade). Eco ids are matched by the item's identity tag,
-# so this works with or without the eco suite installed. Shulker boxes, bundles
-# and other containers are searched too, so packing an item in one does not
-# get it past this list.
+# Items that may never be offered in a trade. Entries are material names
+# (DRAGON_EGG) or eco-item ids (ecoitems:soulbound_blade). Shulker boxes,
+# bundles and other containers are searched too.
 blocked-items: []
 #  - DRAGON_EGG
 #  - ecoitems:soulbound_blade
 
 # Refuse trades involving an account with less than this much playtime, in hours.
-# 0 disables the check.
-#
-# A throwaway alt created to receive a main account's wealth is the usual shape
-# of real-money trading and of ban evasion. A playtime floor does not prevent it,
-# but it makes it cost something. Off by default because it is a blunt tool and
-# it also blocks a genuinely new player being given a starter kit by a friend.
+# Makes throwaway alts cost something, but also blocks new players. 0 disables.
 min-playtime-hours: 0

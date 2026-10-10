@@ -6,12 +6,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
 /**
- * Money, via Vault.
- *
- * <p>Resolved once at startup. When no economy is registered the plugin still runs, but every
- * balance check reports zero, so a coin offer can never be confirmed — items still trade fine. That
- * is deliberate: a trade plugin silently treating "no economy" as "everyone can afford anything"
- * would hand out free items.
+ * Money, via Vault, resolved once at startup. With no economy every balance reads zero, so coin
+ * offers can't be confirmed but items still trade.
  */
 public final class EconomyHook {
 

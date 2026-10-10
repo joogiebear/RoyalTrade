@@ -8,9 +8,8 @@ import java.util.*;
 import java.util.function.BooleanSupplier;
 
 /**
- * Write-ahead payment receipts. Only an explicit REJECTED result is safe to retry; IN_FLIGHT
- * after a crash/exception is deliberately held for reconciliation. Vault has no idempotency key.
- * One small file per settlement avoids rewriting an ever-growing global ledger on each payment.
+ * Write-ahead payment receipts, one small file per settlement. Only an explicit REJECTED result is
+ * safe to retry; IN_FLIGHT after a crash is held for reconciliation, since Vault has no idempotency key.
  */
 public final class PaymentJournal {
     private final Path pending;

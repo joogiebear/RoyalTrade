@@ -8,45 +8,23 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * One trade between two players, and the rules that make it safe.
- *
- * <p>The whole plugin exists to stop one attack: agreeing to a trade and then changing it before it
- * commits. Every defence here follows from that.
- *
- * <ul>
- *   <li><b>Any change clears both confirmations.</b> {@link #touch()} runs on every mutation, so a
- *       swapped item cannot ride in behind a confirmation the other player already gave. This is the
- *       single rule that matters; the rest are depth.</li>
- *   <li><b>A confirm delay.</b> After any change, neither side can confirm for a moment. A
- *       confirmation clicked against the old offer is still in flight when the change lands, so
- *       without this it would be applied to terms the player never saw.</li>
- *   <li><b>A settle window.</b> Once both sides confirm, the trade freezes in {@link State#SETTLING}
- *       and refuses further edits. Without it, an edit landing in the same tick as the commit is a
- *       race, and races are how dupes happen.</li>
- *   <li><b>Escrow.</b> Offered items leave the player's inventory and live here. That stops the same
- *       item being offered in two trades at once, which references-into-inventory cannot.</li>
- * </ul>
- *
- * <p>This class holds state and enforces the rules. It never touches inventories or money — see
- * {@code TradeManager} for the commit, which is a single synchronous block on purpose.
+ * One trade between two players. Any change clears both confirmations, confirming is delayed after a
+ * change, both-confirmed trades freeze in {@link State#SETTLING}, and offered items sit in escrow here.
+ * Inventories and money are only touched by {@code TradeManager}.
  */
 public final class TradeSession {
 
-    /** Where a trade is. Edits are only legal in {@link #ACTIVE}. */
+    // edits are only legal in ACTIVE
     public enum State {
-        /** Both windows open, either side may change their offer. */
         ACTIVE,
-        /** Both confirmed. Frozen: the trade may complete or be cancelled, not edited. */
+        // frozen: may complete or be cancelled, not edited
         SETTLING,
-        /** Items and money have moved. Terminal. */
         COMPLETED,
-        /** Unresolved settlement: no editing, cancellation or automatic replay. */
+        // unresolved settlement: no editing, cancellation or automatic replay
         RECOVERY,
-        /** Nothing moved; escrow has been returned. Terminal. */
         CANCELLED
     }
 
-    /** One player's half of the trade. */
     public static final class Side {
 
         private final UUID playerId;
@@ -68,7 +46,7 @@ public final class TradeSession {
             return playerName;
         }
 
-        /** The escrowed items. Never handed out mutable — callers get a copy. */
+        /** The escrowed items, as a copy. */
         public List<ItemStack> offered() {
             return List.copyOf(offered);
         }
@@ -126,12 +104,8 @@ public final class TradeSession {
     }
 
     /**
-     * Milliseconds until confirming is allowed again after the last change, or 0 if it is now.
-     *
-     * <p>Clearing confirmations on a change is not enough by itself: a player's confirm click is
-     * sent against what their screen showed, and if the other side swaps the offer while that click
-     * is on its way, the click arrives after the change and confirms the new terms. The settle
-     * window gives them a chance to notice, but it can be configured to zero. This delay cannot.
+     * Milliseconds until confirming is allowed again after the last change, or 0 if it is now. A
+     * confirm click already in flight when the offer changes would otherwise accept the new terms.
      */
     public long confirmBlockedFor(long now, long delayMillis) {
         return changedAt == 0 ? 0 : Math.max(0, changedAt + delayMillis - now);
@@ -156,15 +130,8 @@ public final class TradeSession {
         return state == State.ACTIVE;
     }
 
-    // ------------------------------------------------------------------ mutations
-
-    /**
-     * Clear both confirmations. Called by every mutation below.
-     *
-     * <p>Both, not just the side that changed: a player who has confirmed has agreed to a specific
-     * deal, and the deal is no longer that one. Clearing only the mutating side would leave the other
-     * player's agreement attached to terms they never saw — which is the scam.
-     */
+    // every mutation calls this; clear both sides, or the other player's confirm
+    // stays attached to terms they never saw
     private void touch() {
         a.confirmed = false;
         b.confirmed = false;
@@ -183,7 +150,7 @@ public final class TradeSession {
 
     /**
      * Take an escrowed item back out. Returns the stack to hand to the player, or null if the index
-     * is stale — two clicks in the same tick can both target the same slot.
+     * is stale (two clicks in the same tick can both target the same slot).
      */
     public ItemStack removeItem(Side side, int index) {
         if (!editable() || index < 0 || index >= side.offered.size()) {
@@ -194,7 +161,7 @@ public final class TradeSession {
         return removed;
     }
 
-    /** Everything a side has escrowed, emptied out. Used when returning escrow on cancel. */
+    /** Empties and returns a side's escrow, for returning it on cancel. */
     public List<ItemStack> drainItems(Side side) {
         List<ItemStack> out = List.copyOf(side.offered);
         side.offered.clear();
@@ -212,10 +179,7 @@ public final class TradeSession {
 
     /**
      * Record a confirmation. Returns true when this was the second one, so the caller knows to enter
-     * the settle window.
-     *
-     * <p>An empty trade cannot be confirmed: two players both confirming nothing is never intended,
-     * and it is a cheap way to make "trade completed" appear in someone's log.
+     * the settle window. An empty trade cannot be confirmed.
      */
     public boolean confirm(Side side) {
         if (!editable() || (a.isEmpty() && b.isEmpty())) {
@@ -231,8 +195,6 @@ public final class TradeSession {
         }
     }
 
-    // ------------------------------------------------------------------ state
-
     public void beginSettling(long now) {
         if (state == State.ACTIVE) {
             state = State.SETTLING;
@@ -240,7 +202,7 @@ public final class TradeSession {
         }
     }
 
-    /** Back to editable — used when the settle window is broken by a disconnect or a cancel. */
+    /** Back to editable, used when the settle window is broken by a disconnect or a cancel. */
     public void abortSettling() {
         if (state == State.SETTLING) {
             state = State.ACTIVE;

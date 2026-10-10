@@ -15,20 +15,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Keeps escrowed items alive across a crash.
- *
- * <p>While a trade is open the offered items are not in anyone's inventory — they are held by the
- * session. If the server dies at that moment, those items exist only in memory and are simply gone,
- * which reaches the owner as "your plugin ate my hotbar". So every change to escrow is written to
- * disk immediately, and the record is deleted only once the items are somewhere real again.
- *
- * <p>On boot anything still on disk is proof of an unclean shutdown: those items are moved to
- * {@code pending} and handed back the next time each owner logs in. Returning them at boot is not an
- * option, because the owner is usually offline.
- *
- * <p>Writes are synchronous. They are small (a few item stacks) and only happen when a human clicks
- * something, so the cost is irrelevant next to losing items — and an async write is exactly the write
- * that has not landed yet when the process dies.
+ * Keeps escrowed items alive across a crash. Every change is written to disk synchronously and
+ * removed only once the items are back in an inventory. Anything left at boot is moved to
+ * {@code pending} and handed back on each owner's next join.
  */
 public final class Escrow {
 
@@ -46,12 +35,11 @@ public final class Escrow {
 
     /**
      * Load the store and sweep anything left behind by an unclean shutdown into {@code pending}.
-     *
-     * @return how many players are owed items, for the startup log
+     * Returns how many players are owed items.
      */
     public int load(java.util.Set<UUID> heldSessions) {
         if (!file.getParentFile().exists() && !file.getParentFile().mkdirs()) {
-            logger.warning("Could not create the data folder — escrow will not survive a restart.");
+            logger.warning("Could not create the data folder; escrow will not survive a restart.");
         }
         data = new YamlConfiguration();
         try { if (file.exists()) data.load(file); }
@@ -84,10 +72,7 @@ public final class Escrow {
         return recovered;
     }
 
-    /**
-     * Record (or replace) what each player currently has escrowed in one session, in one write.
-     * Every save rewrites and flushes the whole file, so a change costs one flush, not one per side.
-     */
+    /** Record (or replace) what each player has escrowed in one session, in one write. */
     public void hold(UUID sessionId, Map<UUID, List<ItemStack>> offers) {
         for (Map.Entry<UUID, List<ItemStack>> offer : offers.entrySet()) {
             String path = ESCROW + "." + sessionId + "." + offer.getKey();
@@ -96,15 +81,13 @@ public final class Escrow {
         save();
     }
 
-    /** Forget a session. Called once its items are back in inventories, either way the trade ended. */
+    /** Forget a session once its items are back in inventories. */
     public void release(UUID sessionId) {
         data.set(ESCROW + "." + sessionId, null);
         save();
     }
 
-    // ------------------------------------------------------------------ pending returns
-
-    /** Owe a player some items. Appends, so two bad shutdowns do not overwrite each other. */
+    /** Owe a player some items. Appends to what they are already owed. */
     public void queue(UUID playerId, List<ItemStack> items) {
         if (items.isEmpty()) {
             return;
@@ -125,12 +108,7 @@ public final class Escrow {
         return out;
     }
 
-    /**
-     * Give a player everything they are owed. Anything that will not fit stays owed, so a full
-     * inventory delays delivery rather than destroying it.
-     *
-     * @return how many stacks were handed over
-     */
+    /** Give a player everything they are owed; what doesn't fit stays owed. Returns stacks handed over. */
     public int deliver(Player player) {
         List<ItemStack> owed = pendingFor(player.getUniqueId());
         if (owed.isEmpty()) {
@@ -138,8 +116,7 @@ public final class Escrow {
         }
         Map<Integer, ItemStack> leftover =
                 player.getInventory().addItem(owed.toArray(new ItemStack[0]));
-        // Save the inventory before shrinking the debt, so a crash in between re-delivers rather
-        // than leaving the items in neither place.
+        // save the inventory before shrinking the debt: a crash in between re-delivers, never loses
         try {
             player.saveData();
         } catch (RuntimeException e) {

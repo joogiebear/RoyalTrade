@@ -18,15 +18,12 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Player-to-player trading, built so that agreeing to a deal and then changing it is impossible.
- *
- * <p>See {@link TradeSession} for the rules and {@link TradeManager#commit} for the transfer. The
- * short version: any change clears both confirmations, a settle window freezes the trade once both
- * sides agree, and offered items are held in escrow that survives a crash.
+ * Player-to-player trading. See {@link TradeSession} for the rules and {@link TradeManager#commit}
+ * for the transfer.
  */
 public final class RoyalTradePlugin extends JavaPlugin {
 
-    /** bStats project id. Identifies the plugin, not the server, so it is fixed rather than configurable. */
+    // names this plugin's bStats project, so it is fixed rather than configurable
     private static final int BSTATS_PLUGIN_ID = 33890;
 
     private MessageManager messages;
@@ -97,26 +94,19 @@ public final class RoyalTradePlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new TradeListener(this), this);
         getServer().getPluginManager().registerEvents(signInput, this);
 
-        // Drive the settle window. One second is fine: the window is measured in seconds, and a
-        // shorter tick would only add wake-ups for a queue that is almost always empty.
+        // once a second is enough: the settle window is measured in seconds
         getServer().getScheduler().runTaskTimer(this, this::tickSettling, 20L, 20L);
 
         if (!economy.isPresent()) {
-            getLogger().warning("No Vault economy found — items can be traded, coins cannot.");
+            getLogger().warning("No Vault economy found: items can be traded, coins cannot.");
         }
         setupMetrics();
         getLogger().info("RoyalTrade enabled.");
     }
 
-    /**
-     * Anonymous usage reporting via bStats.
-     *
-     * <p>Server owners who want no reporting disable it globally in plugins/bStats/config.yml, which
-     * is the mechanism bStats provides; the id itself is fixed because it names this plugin's project.
-     */
+    // owners opt out globally in plugins/bStats/config.yml
     private void setupMetrics() {
         Metrics metrics = new Metrics(this, BSTATS_PLUGIN_ID);
-        // Trades without a Vault economy are items-only, which is a different plugin in practice.
         metrics.addCustomChart(new SimplePie("economy", () -> String.valueOf(economy.isPresent())));
         metrics.addCustomChart(new SimplePie("econguard", () -> String.valueOf(econGuard.isPresent())));
         metrics.addCustomChart(new SimplePie("settle_seconds",
@@ -130,9 +120,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         if (signInput != null) {
             signInput.shutdown();
         }
-        // Cancel every open trade rather than let the shutdown strand escrowed items. Cancelling
-        // returns them to inventories where possible and queues the rest, so nothing is left only in
-        // memory when the process exits.
+        // cancel open trades so escrow is returned or queued, not left only in memory
         for (TradeSession session : trades == null ? java.util.List.<TradeSession>of() : trades.active()) {
             trades.cancel(session);
         }
@@ -142,8 +130,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         blockedItems = com.mystipixel.royaltrade.config.BlockedItems.parse(
                 getConfig().getStringList("blocked-items"), getLogger());
         settleMillis = Math.max(0L, getConfig().getLong("settle-seconds", 3L) * 1000L);
-        // Floored at one second, not zero: this is what stops a confirmation sent against the old
-        // offer landing on the new one, so it is a protection, not a preference.
+        // floored at one second: it stops a confirm sent against the old offer landing on the new one
         confirmDelayMillis = Math.max(1L, getConfig().getLong("confirm-delay-seconds", 2L)) * 1000L;
         requestExpiryMillis = Math.max(1L, getConfig().getLong("request-expiry-seconds", 60L)) * 1000L;
         requestCooldownMillis = Math.max(0L, getConfig().getLong("request-cooldown-seconds", 5L)) * 1000L;
@@ -158,13 +145,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         messages.reload();
     }
 
-    /**
-     * Complete any trade whose settle window has elapsed.
-     *
-     * <p>The window exists so that an edit landing in the same tick as a confirmation cannot ride
-     * into the commit. Nothing here can change the offer — {@link TradeSession} refuses edits while
-     * settling — so this only decides when to pull the trigger.
-     */
+    // completes trades whose settle window has elapsed; TradeSession refuses edits while settling
     private void tickSettling() {
         long now = System.currentTimeMillis();
         for (TradeSession session : trades.active()) {
@@ -193,8 +174,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
                 }
                 continue;
             }
-            // Anything that stops a commit puts the trade back in players' hands rather than
-            // silently dropping it — they can fix the problem and confirm again.
+            // a failed commit goes back to the players so they can fix it and confirm again
             if (failure == TradeManager.Failure.RECOVERY_REQUIRED) {
                 closeBoth(a, b);
                 if (a != null) messages.send(a, "payment-recovery");
@@ -210,8 +190,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
                 case RESTRICTED -> "trade-restricted";
                 default -> "cancelled";
             };
-            // A restriction will not clear by confirming again, so it ends the trade like a
-            // departure does rather than leaving both players retrying against it.
+            // a restriction won't clear by confirming again, so it ends the trade like a departure
             if (failure == TradeManager.Failure.OFFLINE || failure == TradeManager.Failure.RESTRICTED) {
                 trades.cancel(session);
                 closeBoth(a, b);
@@ -237,8 +216,6 @@ public final class RoyalTradePlugin extends JavaPlugin {
             b.closeInventory();
         }
     }
-
-    // ------------------------------------------------------------------ accessors
 
     public MessageManager messages() {
         return messages;
