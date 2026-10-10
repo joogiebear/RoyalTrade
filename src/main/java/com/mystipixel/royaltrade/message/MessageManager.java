@@ -12,10 +12,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Every user-facing string, in messages.yml.
- *
- * <p>Defaults live here rather than only in the shipped file, so a message added in a later version
- * appears for servers whose messages.yml predates it instead of rendering as a missing key.
+ * Every user-facing string, in messages.yml. Defaults also live here so keys added in later versions
+ * work with an older messages.yml.
  */
 public final class MessageManager {
 

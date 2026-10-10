@@ -24,16 +24,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * An append-only record of every completed trade.
- *
- * <p>This exists for one purpose: answering "he scammed me" three days later. That question is asked
- * about a specific pair of players at a specific time, so a flat file that an admin can grep beats a
- * database they would have to query — and it costs no dependency and cannot be corrupted by a crash
- * mid-write beyond losing the last line.
- *
- * <p>Written after the trade has already committed, so a failure here is logged and swallowed: a
- * missing audit line is a worse outcome than a rolled-back trade, but not by enough to justify
- * undoing goods that both players have already seen arrive.
+ * An append-only, greppable record of every completed trade, for settling disputes. Written after the
+ * commit, so a failure is logged and the trade stands.
  */
 public final class TradeLog {
 
@@ -56,17 +48,14 @@ public final class TradeLog {
             Files.writeString(file.toPath(), line, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
-            logger.log(Level.WARNING, "Could not append to trades.log — this trade has no audit "
+            logger.log(Level.WARNING, "Could not append to trades.log; this trade has no audit "
                     + "record, though it did complete.", e);
         }
     }
 
     /**
      * Items as {@code 1x NETHERITE_SWORD "Doombringer" {sharpness 5}, 1x SHULKER_BOX [contains: ...]}.
-     *
-     * <p>A dispute is about a specific item — "the sword had Sharpness V", "the box was full of
-     * diamonds" — so the name, enchantments and anything packed inside go on the line, not just the
-     * material. Public so EconGuard's ledger can carry the same description.
+     * Also used for EconGuard's ledger.
      */
     public static String describe(List<ItemStack> items) {
         if (items.isEmpty()) {
@@ -77,7 +66,7 @@ public final class TradeLog {
         return sb.toString();
     }
 
-    /** How far into nested containers the log follows. Deeper than this is summarised. */
+    // how far into nested containers the log follows; deeper is summarised
     private static final int MAX_DEPTH = 3;
 
     private static void describeAll(StringBuilder sb, List<ItemStack> items, int depth) {

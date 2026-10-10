@@ -24,26 +24,17 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Everything the trade window responds to.
- *
- * <p>Every click inside the window is cancelled and then acted on by hand. Nothing is ever allowed
- * to move by vanilla inventory mechanics: shift-click, hotbar swap, double-click gather and drag all
- * move items in ways that are easy to reason about wrongly, and one missed case in a trade window is
- * a duplication bug. Cancelling first and moving items ourselves means the only item movements that
- * exist are the ones written here.
+ * Trade window events. Every click is cancelled and then acted on by hand, so no item ever moves by
+ * vanilla inventory mechanics (shift-click, hotbar swap, gather, drag).
  */
 public final class TradeListener implements Listener {
 
     private final RoyalTradePlugin plugin;
 
-    /**
-     * Windows we closed on purpose, so the close handler does not cancel the trade. Keyed to the
-     * exact window rather than just the player: a flag whose close never came would otherwise sit
-     * there and swallow the close of a later trade's window, leaving that trade open with nobody
-     * looking at it.
-     */
+    // windows we closed on purpose; keyed to the exact window so a flag whose close never came
+    // can't swallow the close of a later trade's window
     private final Map<UUID, Inventory> expectedClose = new HashMap<>();
-    /** Players at the coin sign, so closing the window for it does not cancel the trade. */
+    // players at the coin sign, so closing the window for it does not cancel the trade
     private final Set<UUID> awaitingCoins = new HashSet<>();
 
     public TradeListener(RoyalTradePlugin plugin) {
@@ -65,8 +56,7 @@ public final class TradeListener implements Listener {
             return;
         }
 
-        // Cancel unconditionally, including clicks in the player's own inventory: a shift-click from
-        // below would otherwise drop an item into the window without going through the session.
+        // cancel clicks in the player's own inventory too, or a shift-click bypasses the session
         event.setCancelled(true);
 
         TradeSession.Side side = session.sideOf(player.getUniqueId());
@@ -83,7 +73,6 @@ public final class TradeListener implements Listener {
         if (top) {
             handleTopClick(event, player, session, side);
         } else {
-            // From their own inventory: offer the clicked stack.
             ItemStack clicked = event.getCurrentItem();
             if (clicked == null || clicked.getType().isAir()) {
                 return;
@@ -100,7 +89,7 @@ public final class TradeListener implements Listener {
                 case NONE -> { }
             }
             if (side.offered().size() >= TradeGui.MINE.length) {
-                return;                                   // window full; nothing to do
+                return;
             }
             boolean hadConfirmation = anyConfirmed(session);
             if (session.addItem(side, clicked)) {
@@ -153,26 +142,18 @@ public final class TradeListener implements Listener {
                 for (ItemStack stack : leftover.values()) {
                     player.getWorld().dropItemNaturally(player.getLocation(), stack);
                 }
-                // Inventory before escrow when an item comes out: a crash in between then leaves a
-                // copy in both, never in neither.
+                // inventory before escrow when an item comes out: a crash duplicates, never loses
                 plugin.trades().saveInventory(player);
                 afterChange(session, player, hadConfirmation);
             }
         }
-        // Slots on their side, the dividers and the status items are read-only: already cancelled.
     }
 
     private static boolean anyConfirmed(TradeSession session) {
         return session.a().confirmed() || session.b().confirmed();
     }
 
-    /**
-     * Persist the new escrow and redraw both windows.
-     *
-     * <p>The other player is told their confirmation was cleared only when there was one to clear.
-     * Announcing it on every click would train them to ignore the line, and that line is the whole
-     * point — it is what tells someone the deal they agreed to is no longer the deal on the table.
-     */
+    // only announce a cleared confirmation when there was one, so players don't learn to ignore it
     private void afterChange(TradeSession session, Player actor, boolean hadConfirmation) {
         plugin.trades().persist(session);
         plugin.gui().render(session);
@@ -195,12 +176,7 @@ public final class TradeListener implements Listener {
         }
     }
 
-    /**
-     * Closing the window ends the trade.
-     *
-     * <p>The exceptions are a close we performed ourselves and a close caused by the coin prompt —
-     * without those, completing a trade or typing an amount would immediately cancel it.
-     */
+    /** Closing the window ends the trade, except for closes we caused or the coin prompt. */
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
         if (!(event.getPlayer() instanceof Player player)) {
@@ -246,18 +222,8 @@ public final class TradeListener implements Listener {
         }, 20L);
     }
 
-    // ------------------------------------------------------------------ coins
-
-    /**
-     * Ask for a coin amount on a sign.
-     *
-     * <p>A sign rather than chat because the amount is part of the trade, and sending someone to the
-     * chat box to type it drops them out of the window mid-negotiation — and puts the number in
-     * public chat, where the other player reads the offer before it is formally on the table.
-     *
-     * <p>The sign has to close the trade window to open, so {@code awaitingCoins} suppresses the
-     * close-cancels-the-trade rule until they come back.
-     */
+    // a sign, not chat, keeps the amount private until it is offered; opening it closes the trade
+    // window, so awaitingCoins suppresses close-cancels-trade until they come back
     private void promptCoins(Player player, TradeSession session) {
         if (!plugin.economy().isPresent()) {
             plugin.messages().send(player, "no-economy");
@@ -273,10 +239,7 @@ public final class TradeListener implements Listener {
                 typed -> applyCoins(player, typed));
     }
 
-    /**
-     * Handle what came back off the sign. {@code typed} is null when the sign could not be opened —
-     * the player still has to end up back in the trade, not stranded.
-     */
+    // typed is null when the sign could not be opened; the player still goes back to the trade
     private void applyCoins(Player player, String typed) {
         awaitingCoins.remove(player.getUniqueId());
         TradeSession session = plugin.trades().sessionOf(player);
@@ -284,14 +247,12 @@ public final class TradeListener implements Listener {
             return;
         }
         if (typed == null && !SignInput.showingOwnInventory(player)) {
-            // The prompt was displaced by another menu. That is leaving the trade window as surely
-            // as closing it is, so it ends the trade the same way instead of dragging them back.
+            // displaced by another menu: that counts as leaving the trade window, so cancel
             cancel(session, player, true);
             return;
         }
         if (!session.editable()) {
-            // Both sides confirmed while this player was at the sign. The amount is moot, but they
-            // still belong in the window to watch it settle — or to fix things if it fails.
+            // both confirmed while this player was at the sign; reopen so they can watch it settle
             if (session.state() == TradeSession.State.SETTLING) {
                 reopen(player, session);
             }
@@ -314,9 +275,7 @@ public final class TradeListener implements Listener {
             reopen(player, session);
             return;
         }
-        // isFinite, not just >= 0: parseDouble accepts "NaN" and "Infinity", NaN passes every <
-        // comparison, and what a Vault provider does with either is provider-defined (EssentialsX
-        // throws). Neither is ever a legitimate offer.
+        // parseDouble accepts "NaN" and "Infinity", and NaN passes every < check
         if (!Double.isFinite(amount) || amount < 0) {
             plugin.messages().send(player, "coins-invalid");
             reopen(player, session);
@@ -347,8 +306,6 @@ public final class TradeListener implements Listener {
         }
     }
 
-    // ------------------------------------------------------------------ cancel
-
     private void cancel(TradeSession session, Player actor, boolean tellActor) {
         if (session.state() == TradeSession.State.RECOVERY) {
             if (tellActor) plugin.messages().send(actor, "payment-recovery");
@@ -362,9 +319,8 @@ public final class TradeListener implements Listener {
             if (p == null) {
                 continue;
             }
-            // Only close the trade window itself. Anything else on screen — another plugin's menu
-            // that displaced the coin prompt — is theirs, and flagging a close that never comes
-            // would leave expectedClose set to swallow the next trade window's real close.
+            // only close the trade window itself; flagging a close that never comes would swallow
+            // the next trade window's real close
             Inventory top = p.getOpenInventory().getTopInventory();
             if (plugin.gui().isTradeView(p, top)) {
                 expectedClose.put(p.getUniqueId(), top);

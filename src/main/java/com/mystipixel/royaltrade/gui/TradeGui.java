@@ -17,28 +17,21 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The trade window.
- *
- * <p>Each player gets their <em>own</em> inventory rather than both viewing one shared object, so
- * that "your offer" is always on the left for whoever is looking. A single shared inventory would
- * put the same player's items on the left for both of them, which reads as though you are about to
- * give away what you are receiving — precisely the confusion a trade window must not create.
- *
- * <p>The cost is that both views must be redrawn on every change. {@link #render} does both at once
- * and is called after every mutation, so the two windows cannot disagree about what is on the table.
+ * The trade window. Each player gets their own inventory so "your offer" is always on the left;
+ * {@link #render} redraws both after every change so they cannot disagree.
  */
 public final class TradeGui {
 
     public static final int SIZE = 54;
 
-    /** Rows 1-4, columns 1-4. Where your offer sits, in your own window. */
+    // rows 1-4, columns 1-4: your offer
     public static final int[] MINE = {
             0, 1, 2, 3,
             9, 10, 11, 12,
             18, 19, 20, 21,
             27, 28, 29, 30
     };
-    /** Rows 1-4, columns 6-9. The other side, read-only. */
+    // rows 1-4, columns 6-9: the other side, read-only
     public static final int[] THEIRS = {
             5, 6, 7, 8,
             14, 15, 16, 17,
@@ -137,14 +130,12 @@ public final class TradeGui {
         long blocked = session.confirmBlockedFor(System.currentTimeMillis(), confirmDelayMillis.getAsLong());
         inv.setItem(MY_CONFIRM, settling || blocked <= 0
                 ? confirmItem(viewer.confirmed(), true, settling, secondsLeft)
-                : named(Material.ORANGE_DYE, "&6Offer changed — confirm in " + ((blocked + 999) / 1000) + "s",
+                : named(Material.ORANGE_DYE, "&6Offer changed: confirm in " + ((blocked + 999) / 1000) + "s",
                         List.of("&7Check both sides before you confirm.")));
         inv.setItem(THEIR_CONFIRM, confirmItem(them.confirmed(), false, settling, secondsLeft));
         inv.setItem(CLOSE, named(Material.BARRIER, "&cCancel trade",
                 List.of("&7Nothing changes hands.", "&7Your items come straight back.")));
     }
-
-    // ------------------------------------------------------------------ items
 
     private ItemStack coinItem(String title, double amount, boolean own) {
         List<String> lore = new ArrayList<>();
@@ -161,8 +152,7 @@ public final class TradeGui {
 
     private ItemStack confirmItem(boolean confirmed, boolean own, boolean settling, long secondsLeft) {
         if (settling) {
-            // A live countdown, re-rendered each second by the settle ticker. A static "Completing…"
-            // reads as a hang, and a freeze that looks hung is exactly when people panic-click Cancel.
+            // live countdown, re-rendered each second; a static label reads as a hang
             return named(Material.CLOCK, "&6Completing in " + secondsLeft + "s…",
                     List.of("&7Both sides have confirmed.", "&7The trade is locked while it settles."));
         }

@@ -16,13 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/**
- * Who has incoming trade requests switched off, persisted in {@code toggles.yml}.
- *
- * <p>Persisted rather than per-session on purpose: an opt-out that silently resets on relog is worse
- * than none, because the player only discovers it via the next unwanted request. Writes are small,
- * synchronous and rare (a human typed a command), following the same reasoning as the escrow store.
- */
+/** Who has incoming trade requests switched off, persisted in {@code toggles.yml}. */
 public final class TradeToggles {
 
     private final File file;
@@ -48,12 +42,11 @@ public final class TradeToggles {
         }
     }
 
-    /** Whether this player has incoming trade requests blocked. */
     public boolean isBlocking(UUID player) {
         return blocking.contains(player);
     }
 
-    /** Flip the player's setting and persist it. Returns the new state — true = now blocking. */
+    /** Flip the player's setting and persist it. Returns true if now blocking. */
     public boolean toggle(UUID player) {
         boolean nowBlocking;
         if (blocking.remove(player)) {
@@ -73,9 +66,7 @@ public final class TradeToggles {
             ids.add(id.toString());
         }
         out.set("blocking", ids);
-        // Written beside the real file and moved over it, so a crash mid-write leaves the old list
-        // rather than a truncated one that loads as "nobody is blocking" and silently re-opens
-        // everyone to the requests they switched off.
+        // temp file then move, so a crash mid-write keeps the old list instead of an empty one
         Path temporary = null;
         try {
             Path target = file.toPath();
@@ -84,7 +75,7 @@ public final class TradeToggles {
             Files.writeString(temporary, out.saveToString(), StandardCharsets.UTF_8);
             Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            logger.log(Level.WARNING, "Could not save toggles.yml — request toggles may reset on restart.", e);
+            logger.log(Level.WARNING, "Could not save toggles.yml; request toggles may reset on restart.", e);
         } finally {
             if (temporary != null) {
                 try {

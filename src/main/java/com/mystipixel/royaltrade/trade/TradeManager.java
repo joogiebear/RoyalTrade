@@ -20,16 +20,12 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Owns every live trade, and performs the commit.
- *
- * <p>{@link #commit} is the only place items and money move. It runs as one synchronous main-thread
- * block from first check to last transfer, with no scheduling, no async economy call and no event in
- * the middle. Vault calls can reject or throw after earlier legs succeeded, so settlement receipts
- * are persisted and unresolved trades remain held rather than completed or charged again.
+ * Owns every live trade. {@link #commit} is the only place items and money move, in one synchronous
+ * main-thread block; a settlement that fails partway is held for recovery, never retried.
  */
 public final class TradeManager {
 
-    /** Why a commit refused. Callers turn this into a message. */
+    /** Why a commit refused. */
     public enum Failure {
         NONE,
         OFFLINE,
@@ -53,10 +49,7 @@ public final class TradeManager {
     private final Map<UUID, TradeSession> byPlayer = new HashMap<>();
     private final Map<UUID, TradeSession> byId = new HashMap<>();
     private final Map<TradeSession, UUID> ids = new HashMap<>();
-    /**
-     * target -> (requester -> when sent). Several per target: a second player asking must not
-     * silently wipe out the first request, which the first player still believes is waiting.
-     */
+    // target -> (requester -> sent at); several per target so a second request can't wipe the first
     private final Map<UUID, Map<UUID, Long>> requests = new HashMap<>();
 
     public TradeManager(EconomyHook economy, Escrow escrow, TradeLog log, EconGuardHook econGuard,
@@ -72,8 +65,6 @@ public final class TradeManager {
         this.log = log;
         this.econGuard = econGuard;
     }
-
-    // ------------------------------------------------------------------ sessions
 
     public TradeSession sessionOf(Player player) {
         return byPlayer.get(player.getUniqueId());
@@ -101,18 +92,9 @@ public final class TradeManager {
     }
 
     /**
-     * Persist a side's escrow after any change to it, then the players' own saves.
-     *
-     * <p>Escrow is on disk the moment it changes, but a player's inventory is only written at the
-     * next autosave. Left like that, a crash after an item moved into escrow restores it twice: once
-     * from the stale player save and once from escrow on the next join. So both are written, escrow
-     * first. A crash in the moment between the two writes still leaves a copy in both — a duplicate —
-     * but the other order would lose the item instead, and a duplicate is the lesser harm. An item
-     * coming <em>out</em> of escrow needs the reverse, so that caller saves the inventory first with
-     * {@link #saveInventory}.
-     *
-     * <p>These saves run on every offer change, on the main thread. They aren't batched: an escrow
-     * write held back behind a server autosave of the player could lose the item outright.
+     * Write escrow, then the players' data, so a crash can't restore an escrowed item from a stale
+     * player save. Escrow first: a crash between the writes duplicates rather than loses. Items
+     * leaving escrow need the reverse order (save the inventory first). Runs on the main thread.
      */
     public void persist(TradeSession session) {
         UUID id = ids.get(session);
@@ -124,10 +106,7 @@ public final class TradeManager {
         saveInventories(session);
     }
 
-    /**
-     * Write a player's data to disk now, so their inventory agrees with escrow if the process dies.
-     * A failed save is logged, not thrown: it only reopens the crash window this narrows.
-     */
+    /** Write a player's data now so it agrees with escrow. A failed save is logged, not thrown. */
     public void saveInventory(Player player) {
         if (player == null || !player.isOnline()) {
             return;
@@ -157,15 +136,12 @@ public final class TradeManager {
         byPlayer.remove(session.b().playerId());
     }
 
-    // ------------------------------------------------------------------ requests
-
     public void request(Player from, Player to, long expiryMillis) {
         pruneExpired(to.getUniqueId(), expiryMillis);
         requests.computeIfAbsent(to.getUniqueId(), k -> new HashMap<>())
                 .put(from.getUniqueId(), System.currentTimeMillis());
     }
 
-    /** Whether {@code requester} has a live request waiting on {@code target}. */
     public boolean hasRequest(Player target, Player requester, long expiryMillis) {
         pruneExpired(target.getUniqueId(), expiryMillis);
         Map<UUID, Long> waiting = requests.get(target.getUniqueId());
@@ -182,10 +158,7 @@ public final class TradeManager {
         }
     }
 
-    /**
-     * Drop every request a departing player sent or was sent. Neither can be answered once they
-     * have gone, and without this the map keeps an entry for everyone who ever logged in.
-     */
+    /** Drop every request a departing player sent or was sent. */
     public void forgetRequests(UUID player) {
         requests.remove(player);
         requests.values().removeIf(waiting -> {
@@ -206,12 +179,9 @@ public final class TradeManager {
         }
     }
 
-    // ------------------------------------------------------------------ cancel
-
     /**
-     * End a trade without moving anything. Escrow goes back to whoever offered it; if they are
-     * offline or full it is queued and handed over on their next join, never dropped on the floor
-     * where someone else could take it.
+     * End a trade without moving anything. Escrow goes back to whoever offered it, or is queued for
+     * their next join if they are offline or full.
      */
     public void cancel(TradeSession session) {
         if (session.finished() || session.state() == TradeSession.State.RECOVERY) {
@@ -220,7 +190,7 @@ public final class TradeManager {
         session.markCancelled();
         returnEscrow(session, session.a());
         returnEscrow(session, session.b());
-        saveInventories(session);   // before escrow is released — see persist()
+        saveInventories(session);   // before escrow is released, see persist()
         forget(session);
     }
 
@@ -241,13 +211,9 @@ public final class TradeManager {
         }
     }
 
-    // ------------------------------------------------------------------ commit
-
     /**
-     * Move the goods. One block, no yielding.
-     *
-     * <p>Both debits and credits must be confirmed before item delivery. A rejected second debit
-     * can abort only after its refund succeeds. Partial/unknown outcomes hold escrow for operators.
+     * Move the goods in one block, no yielding. Debits and credits must all succeed before items are
+     * delivered; a partial or unknown outcome holds escrow for operators.
      */
     public Failure commit(TradeSession session) {
         if (session.state() != TradeSession.State.SETTLING || !ids.containsKey(session)) {
@@ -263,17 +229,14 @@ public final class TradeManager {
         double coinsA = session.a().coins();
         double coinsB = session.b().coins();
 
-        // --- checks, all before any mutation -------------------------------
-        // Asked again here, not just at request time: a player can be flagged mid-trade, and this
-        // is the last point at which nothing has moved.
+        // all checks before any mutation; EconGuard again since a player can be flagged mid-trade
         if (!econGuard.allow(pa) || !econGuard.allow(pb)) {
             return Failure.RESTRICTED;
         }
         if (!economy.has(pa, coinsA) || !economy.has(pb, coinsB)) {
             return Failure.INSUFFICIENT_FUNDS;
         }
-        // Each player receives the other's items. Their own offer already left their inventory, so
-        // the space it vacated counts — which is why this is simulated against live contents.
+        // simulated against live contents: space freed by a player's own escrowed offer counts
         if (!hasSpaceFor(pa, session.b().offered()) || !hasSpaceFor(pb, session.a().offered())) {
             return Failure.NO_INVENTORY_SPACE;
         }
@@ -316,8 +279,7 @@ public final class TradeManager {
             toB = session.drainItems(session.a());
             give(pa, toA);
             give(pb, toB);
-            // Before escrow is released, so a crash cannot leave a player with the stale save's
-            // copy of what they just handed over as well as what they received.
+            // before escrow is released, see persist()
             saveInventory(pa);
             saveInventory(pb);
             forget(session); // Strict escrow persistence must succeed before closing the receipt.
@@ -343,10 +305,7 @@ public final class TradeManager {
         return Failure.RECOVERY_REQUIRED;
     }
 
-    /**
-     * Would these stacks fit? Simulated against a copy of the player's storage, because
-     * {@code addItem} is the only thing that knows how stacking actually resolves.
-     */
+    // simulated on a copy because addItem is the only thing that knows how stacking resolves
     private boolean hasSpaceFor(Player player, List<ItemStack> incoming) {
         if (incoming.isEmpty()) {
             return true;
@@ -365,7 +324,7 @@ public final class TradeManager {
         return probe.addItem(clones.toArray(new ItemStack[0])).isEmpty();
     }
 
-    /** Hand items over. Space was checked, so leftovers are impossible — dropped rather than lost. */
+    // space was checked, so leftovers shouldn't happen; dropped rather than lost if they do
     private void give(Player player, List<ItemStack> items) {
         if (items.isEmpty()) {
             return;

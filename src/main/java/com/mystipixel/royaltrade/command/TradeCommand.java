@@ -19,11 +19,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * {@code /trade <player>} — sends a request, or accepts one already waiting from that player.
- *
- * <p>One command does both halves on purpose: the second player types the same thing the first one
- * did, so there is no "accept" command to remember, and no window where a stray /accept lands on a
- * trade the player did not mean to join.
+ * {@code /trade <player>} sends a request, or accepts one already waiting from that player. There is
+ * deliberately no separate accept command, so a stray /accept can't join an unintended trade.
  */
 public final class TradeCommand implements CommandExecutor, TabCompleter, Listener {
 
@@ -51,8 +48,7 @@ public final class TradeCommand implements CommandExecutor, TabCompleter, Listen
             return true;
         }
 
-        // /trade toggle — switch incoming requests off or back on. A player named "toggle" becomes
-        // unreachable by name, the same trade-off "reload" already makes.
+        // /trade toggle: a player named "toggle" becomes unreachable by name, as with "reload"
         if (args[0].equalsIgnoreCase("toggle")) {
             boolean nowBlocking = plugin.toggles().toggle(player.getUniqueId());
             plugin.messages().send(player, nowBlocking ? "toggle-on" : "toggle-off");
@@ -87,8 +83,7 @@ public final class TradeCommand implements CommandExecutor, TabCompleter, Listen
         if (tooNew(player, player, "too-new") || tooNew(player, target, "they-are-too-new")) {
             return true;
         }
-        // EconGuard's veto, on both the request and the acceptance. The other player is told only
-        // that they cannot trade with this person, not why — a flag is staff business.
+        // EconGuard's veto on request and acceptance; the other player is not told why
         if (!plugin.econGuard().allow(player)) {
             plugin.messages().send(player, "trade-restricted-self");
             return true;
@@ -98,7 +93,7 @@ public final class TradeCommand implements CommandExecutor, TabCompleter, Listen
             return true;
         }
 
-        // Already invited by this player? Then this is the acceptance.
+        // already invited by this player: this is the acceptance
         if (plugin.trades().hasRequest(player, target, plugin.requestExpiryMillis())) {
             plugin.trades().clearRequest(player, target);
             TradeSession session = plugin.trades().open(player, target);
@@ -108,8 +103,7 @@ public final class TradeCommand implements CommandExecutor, TabCompleter, Listen
             return true;
         }
 
-        // Checked after the acceptance branch on purpose: a toggle means "stop asking me",
-        // not "cancel the request I already decided to answer".
+        // after the acceptance branch on purpose: a toggle means "stop asking me", not "cancel my answer"
         if (plugin.toggles().isBlocking(target.getUniqueId())) {
             plugin.messages().send(player, "requests-blocked", Map.of("player", target.getName()));
             return true;
@@ -129,7 +123,6 @@ public final class TradeCommand implements CommandExecutor, TabCompleter, Listen
         return true;
     }
 
-    /** Forget a departing player's cooldown and requests, so neither map grows for good. */
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
@@ -137,7 +130,6 @@ public final class TradeCommand implements CommandExecutor, TabCompleter, Listen
         plugin.trades().forgetRequests(id);
     }
 
-    /** Distance and world limits. Both are anti-RMT levers as much as convenience ones. */
     private boolean withinReach(Player player, Player target) {
         if (plugin.sameWorldOnly() && !player.getWorld().equals(target.getWorld())) {
             plugin.messages().send(player, "different-world", Map.of("player", target.getName()));
@@ -152,13 +144,7 @@ public final class TradeCommand implements CommandExecutor, TabCompleter, Listen
         return true;
     }
 
-    /**
-     * Refuse trades from accounts too new to have earned anything.
-     *
-     * <p>Off by default. It is a blunt instrument, but a throwaway alt created to receive a
-     * character's wealth is the shape most RMT takes, and a playtime floor is the cheapest thing
-     * that makes it inconvenient.
-     */
+    // playtime floor against throwaway alts used to receive wealth; off by default
     private boolean tooNew(Player toTell, Player subject, String key) {
         double hours = plugin.minPlaytimeHours();
         if (hours <= 0) {
