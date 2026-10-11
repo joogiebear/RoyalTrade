@@ -55,8 +55,8 @@ public final class MessageManager {
         DEFAULTS.put("payment-recovery", "&cThis trade is on hold because a payment could not be confirmed. Contact staff; do not repeat the trade.");
         DEFAULTS.put("economy-error", "&cThe payment failed. Nothing was traded.");
         DEFAULTS.put("other-left", "&cThe other player left. The trade was cancelled.");
-        DEFAULTS.put("coins-prompt",
-                "&7Type an amount on the sign, or leave it blank to keep the current offer.");
+        DEFAULTS.put("coins-prompt-title", "&fHow many coins to offer?");
+        DEFAULTS.put("coins-prompt", "&7Leave it blank to keep the current offer.");
         DEFAULTS.put("coins-invalid", "&cThat is not a valid amount.");
         DEFAULTS.put("coins-too-much", "&cYou do not have that much.");
         DEFAULTS.put("coins-set", "&aYour coin offer is now &f{amount}&a.");
@@ -72,7 +72,13 @@ public final class MessageManager {
         DEFAULTS.put("trade-restricted",
                 "&cThis trade can't go ahead right now, so it was cancelled. Your items have been returned.");
         DEFAULTS.put("reloaded", "&aRoyalTrade reloaded.");
+        DEFAULTS.put("input.confirm", "&aDone");
+        DEFAULTS.put("input.cancel", "&cCancel");
     }
+
+    // shipped defaults that were reworded; a file still holding the old text gets the new one
+    private static final Map<String, String> REWORDED = Map.of(
+            "coins-prompt", "&7Type an amount on the sign, or leave it blank to keep the current offer.");
 
     private final File file;
     private final Logger logger;
@@ -88,7 +94,8 @@ public final class MessageManager {
         config = YamlConfiguration.loadConfiguration(file);
         boolean dirty = false;
         for (Map.Entry<String, String> entry : DEFAULTS.entrySet()) {
-            if (!config.isSet(entry.getKey())) {
+            if (!config.isSet(entry.getKey())
+                    || config.getString(entry.getKey(), "").equals(REWORDED.get(entry.getKey()))) {
                 config.set(entry.getKey(), entry.getValue());
                 dirty = true;
             }
