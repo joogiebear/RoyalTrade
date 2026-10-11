@@ -5,7 +5,7 @@ Player-to-player trading that cannot be changed after both sides agree.
 Two players put items and coins on the table, both confirm, and the goods change hands. The whole
 plugin exists to close one attack: agreeing to a deal and then altering it before it commits.
 
-Coin amounts are typed on a sign rather than in chat. Chat would drop a player out of the window
+Coin amounts are typed into a dialog rather than in chat. Chat would drop a player out of the window
 mid-negotiation, and it would put their offer in public chat before it was formally on the table.
 
 Requires Paper 26.2 or newer.

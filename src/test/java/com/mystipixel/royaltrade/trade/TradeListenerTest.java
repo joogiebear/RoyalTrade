@@ -1,7 +1,9 @@
 package com.mystipixel.royaltrade.trade;
 
 import com.mystipixel.royaltrade.RoyalTradePlugin;
+import com.mystipixel.royaltrade.gui.TextInput;
 import com.mystipixel.royaltrade.gui.TradeGui;
+import com.mystipixel.royaltrade.hooks.EconomyHook;
 import com.mystipixel.royaltrade.message.MessageManager;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -9,9 +11,11 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 import static org.mockito.Mockito.*;
 
 class TradeListenerTest {
@@ -76,5 +80,46 @@ class TradeListenerTest {
         listener.onClose(closeOf(a, mock(Inventory.class)));
         listener.onClose(closeOf(a, mock(Inventory.class)));
         verify(trades, times(2)).cancel(session);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Consumer<String> askForCoins(TextInput input, Inventory window) throws ReflectiveOperationException {
+        when(plugin.textInput()).thenReturn(input);
+        EconomyHook economy = mock(EconomyHook.class);
+        when(economy.isPresent()).thenReturn(true);
+        when(plugin.economy()).thenReturn(economy);
+        when(plugin.gui().viewOf(a)).thenReturn(window);
+        when(plugin.messages().raw(anyString())).thenReturn("");
+        var prompt = TradeListener.class.getDeclaredMethod("promptCoins", Player.class, TradeSession.class);
+        prompt.setAccessible(true);
+        prompt.invoke(listener, a, session);
+        ArgumentCaptor<Consumer<String>> callback = ArgumentCaptor.forClass(Consumer.class);
+        verify(input).request(eq(a), anyList(), callback.capture());
+        return callback.getValue();
+    }
+    // the screen-free and other-menu cases read InventoryType, which needs a running server
+    @Test void noAnswerAfterDyingCancelsTheTrade() throws Exception {
+        Consumer<String> callback = askForCoins(mock(TextInput.class), mock(Inventory.class));
+        when(a.isOnline()).thenReturn(true);
+        when(a.isDead()).thenReturn(true);
+        callback.accept(null);
+        verify(trades).cancel(session);
+        verify(a, never()).openInventory(any(Inventory.class));
+    }
+    @Test void noAnswerAfterTheTradeEndedDoesNothing() throws Exception {
+        Consumer<String> callback = askForCoins(mock(TextInput.class), mock(Inventory.class));
+        when(trades.sessionOf(a)).thenReturn(null);
+        callback.accept(null);
+        verify(trades, never()).cancel(any());
+        verify(a, never()).openInventory(any(Inventory.class));
+    }
+    @Test void noAnswerWhileANewerPromptWaitsKeepsTheTradeOpen() throws Exception {
+        TextInput input = mock(TextInput.class);
+        Consumer<String> callback = askForCoins(input, mock(Inventory.class));
+        when(input.isWaiting(a)).thenReturn(true);
+        callback.accept(null);
+        listener.onClose(closeOf(a, mock(Inventory.class)));
+        verify(trades, never()).cancel(any());
+        verify(a, never()).openInventory(any(Inventory.class));
     }
 }

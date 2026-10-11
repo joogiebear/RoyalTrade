@@ -3,7 +3,7 @@ package com.mystipixel.royaltrade;
 import com.mystipixel.royaltrade.command.TradeCommand;
 import com.mystipixel.royaltrade.data.Escrow;
 import com.mystipixel.royaltrade.data.TradeLog;
-import com.mystipixel.royaltrade.gui.SignInput;
+import com.mystipixel.royaltrade.gui.TextInput;
 import com.mystipixel.royaltrade.gui.TradeGui;
 import com.mystipixel.royaltrade.hooks.EconGuardHook;
 import com.mystipixel.royaltrade.hooks.EconomyHook;
@@ -33,7 +33,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
     private TradeLog log;
     private TradeManager trades;
     private TradeGui gui;
-    private SignInput signInput;
+    private TextInput textInput;
 
     private com.mystipixel.royaltrade.data.TradeToggles toggles;
     private com.mystipixel.royaltrade.config.BlockedItems blockedItems;
@@ -83,7 +83,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         econGuard = new EconGuardHook();
         trades = new TradeManager(economy, escrow, log, econGuard, payments, getLogger());
         gui = new TradeGui(economy, this::settleMillis, this::confirmDelayMillis);
-        signInput = new SignInput(this);
+        textInput = new TextInput(this, messages);
 
         TradeCommand command = new TradeCommand(this);
         if (getCommand("trade") != null) {
@@ -92,7 +92,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         }
         getServer().getPluginManager().registerEvents(command, this);
         getServer().getPluginManager().registerEvents(new TradeListener(this), this);
-        getServer().getPluginManager().registerEvents(signInput, this);
+        getServer().getPluginManager().registerEvents(textInput, this);
 
         // once a second is enough: the settle window is measured in seconds
         getServer().getScheduler().runTaskTimer(this, this::tickSettling, 20L, 20L);
@@ -117,8 +117,8 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        if (signInput != null) {
-            signInput.shutdown();
+        if (textInput != null) {
+            textInput.shutdown();
         }
         // cancel open trades so escrow is returned or queued, not left only in memory
         for (TradeSession session : trades == null ? java.util.List.<TradeSession>of() : trades.active()) {
@@ -241,8 +241,8 @@ public final class RoyalTradePlugin extends JavaPlugin {
         return gui;
     }
 
-    public SignInput signInput() {
-        return signInput;
+    public TextInput textInput() {
+        return textInput;
     }
 
     public com.mystipixel.royaltrade.data.TradeToggles toggles() {

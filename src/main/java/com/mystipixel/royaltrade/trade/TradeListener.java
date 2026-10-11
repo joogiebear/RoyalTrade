@@ -1,7 +1,6 @@
 package com.mystipixel.royaltrade.trade;
 
 import com.mystipixel.royaltrade.RoyalTradePlugin;
-import com.mystipixel.royaltrade.gui.SignInput;
 import com.mystipixel.royaltrade.gui.TradeGui;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -11,6 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
@@ -34,7 +34,7 @@ public final class TradeListener implements Listener {
     // windows we closed on purpose; keyed to the exact window so a flag whose close never came
     // can't swallow the close of a later trade's window
     private final Map<UUID, Inventory> expectedClose = new HashMap<>();
-    // players at the coin sign, so closing the window for it does not cancel the trade
+    // players at the coin prompt, so closing the window for it does not cancel the trade
     private final Set<UUID> awaitingCoins = new HashSet<>();
 
     public TradeListener(RoyalTradePlugin plugin) {
@@ -222,7 +222,7 @@ public final class TradeListener implements Listener {
         }, 20L);
     }
 
-    // a sign, not chat, keeps the amount private until it is offered; opening it closes the trade
+    // a dialog, not chat, keeps the amount private until it is offered; opening it closes the trade
     // window, so awaitingCoins suppresses close-cancels-trade until they come back
     private void promptCoins(Player player, TradeSession session) {
         if (!plugin.economy().isPresent()) {
@@ -234,25 +234,28 @@ public final class TradeListener implements Listener {
         if (view != null) {
             expectedClose.put(player.getUniqueId(), view);
         }
-        plugin.signInput().request(player,
-                List.of("^^^^^^^^^^^^^^^", "How many coins", "to offer?"),
+        plugin.textInput().request(player,
+                List.of(plugin.messages().raw("coins-prompt-title"), plugin.messages().raw("coins-prompt")),
                 typed -> applyCoins(player, typed));
     }
 
-    // typed is null when the sign could not be opened; the player still goes back to the trade
+    // typed is null when no answer is coming
     private void applyCoins(Player player, String typed) {
+        if (typed == null && plugin.textInput().isWaiting(player)) {
+            return;                      // a newer coin prompt is up and still needs awaitingCoins
+        }
         awaitingCoins.remove(player.getUniqueId());
         TradeSession session = plugin.trades().sessionOf(player);
         if (session == null) {
             return;
         }
-        if (typed == null && !SignInput.showingOwnInventory(player)) {
-            // displaced by another menu: that counts as leaving the trade window, so cancel
+        if (typed == null && !screenFree(player)) {
+            // dead or displaced by another menu: that counts as leaving the trade window, so cancel
             cancel(session, player, true);
             return;
         }
         if (!session.editable()) {
-            // both confirmed while this player was at the sign; reopen so they can watch it settle
+            // both confirmed while this player was at the prompt; reopen so they can watch it settle
             if (session.state() == TradeSession.State.SETTLING) {
                 reopen(player, session);
             }
@@ -297,6 +300,14 @@ public final class TradeListener implements Listener {
             plugin.messages().send(other, "confirm-reset");
         }
         reopen(player, session);
+    }
+
+    private static boolean screenFree(Player player) {
+        if (!player.isOnline() || player.isDead()) {
+            return false;
+        }
+        InventoryType top = player.getOpenInventory().getTopInventory().getType();
+        return top == InventoryType.CRAFTING || top == InventoryType.CREATIVE;
     }
 
     private void reopen(Player player, TradeSession session) {
