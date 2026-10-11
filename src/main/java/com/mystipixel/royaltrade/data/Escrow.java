@@ -1,22 +1,24 @@
 package com.mystipixel.royaltrade.data;
 
+import com.mystipixel.royaltrade.util.DataFiles;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
 import java.io.File;
-import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Keeps escrowed items alive across a crash. Every change is written to disk synchronously and
- * removed only once the items are back in an inventory. Anything left at boot is moved to
+ * Keeps escrowed items alive across a crash. Changes are written by a background writer, newest state
+ * wins; {@link #flush} waits until the current state is on disk. Anything left at boot is moved to
  * {@code pending} and handed back on each owner's next join.
  */
 public final class Escrow {
@@ -24,13 +26,22 @@ public final class Escrow {
     private static final String ESCROW = "escrow";
     private static final String PENDING = "pending";
 
+    // settlement blocks the main thread on this; a disk slower than this holds the trade instead
+    private static final long FLUSH_TIMEOUT_MILLIS = 10_000L;
+
     private final File file;
     private final Logger logger;
+    private final Executor mainThread;
+    private final EscrowWriter writer;
     private YamlConfiguration data;
+    // false until load succeeds, so a failed load never writes an empty store over the real one
+    private boolean loaded;
 
-    public Escrow(File dataFolder, Logger logger) {
+    public Escrow(File dataFolder, Logger logger, Executor mainThread) {
         this.file = new File(dataFolder, "escrow.yml");
         this.logger = logger;
+        this.mainThread = mainThread;
+        this.writer = new EscrowWriter(snapshot -> DataFiles.write(file.toPath(), snapshot), logger);
     }
 
     /**
@@ -68,17 +79,22 @@ public final class Escrow {
                 data.set(base, null);
             }
             save();
+            flush();
         }
+        loaded = true;
         return recovered;
     }
 
-    /** Record (or replace) what each player has escrowed in one session, in one write. */
-    public void hold(UUID sessionId, Map<UUID, List<ItemStack>> offers) {
+    /**
+     * Record (or replace) what each player has escrowed in one session, in one write. Returns the write's
+     * number for {@link #whenDurable}.
+     */
+    public long hold(UUID sessionId, Map<UUID, List<ItemStack>> offers) {
         for (Map.Entry<UUID, List<ItemStack>> offer : offers.entrySet()) {
             String path = ESCROW + "." + sessionId + "." + offer.getKey();
             data.set(path, offer.getValue().isEmpty() ? null : new ArrayList<>(offer.getValue()));
         }
-        save();
+        return save();
     }
 
     /** Forget a session once its items are back in inventories. */
@@ -140,26 +156,35 @@ public final class Escrow {
         return out;
     }
 
-    private void save() {
-        java.nio.file.Path temporary = null;
-        try {
-            java.nio.file.Path target = file.toPath();
-            temporary = java.nio.file.Files.createTempFile(target.getParent(), ".escrow-", ".tmp");
-            byte[] bytes = data.saveToString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            try (var channel = java.nio.channels.FileChannel.open(temporary, java.nio.file.StandardOpenOption.WRITE)) {
-                java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
-                while (buffer.hasRemaining()) channel.write(buffer);
-                channel.force(true);
-            }
-            java.nio.file.Files.move(temporary, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            logger.log(Level.SEVERE, "Cannot persist escrow; stopping this operation", e);
-            throw new java.io.UncheckedIOException(e);
-        } finally {
-            if (temporary != null) {
-                try { java.nio.file.Files.deleteIfExists(temporary); } catch (IOException ignored) { }
+    /** Blocks until everything changed so far is on disk. Throws if it could not be written. */
+    public void flush() {
+        writer.await(writer.requested(), FLUSH_TIMEOUT_MILLIS);
+    }
+
+    /** Runs task on the main thread once write {@code seq} (or a newer one) is on disk. */
+    public void whenDurable(long seq, Runnable task) {
+        writer.whenDurable(seq, () -> mainThread.execute(task));
+    }
+
+    /** The newest write that is on disk. */
+    public long durableSeq() {
+        return writer.durable();
+    }
+
+    /** Writes the final state and stops the writer: the disable path. */
+    public void close() {
+        if (loaded) {
+            try {
+                writer.await(save(), FLUSH_TIMEOUT_MILLIS);
+            } catch (UncheckedIOException | IllegalStateException e) {
+                logger.log(Level.SEVERE, "Could not write escrow.yml on shutdown; the last escrow change may be lost", e);
             }
         }
+        writer.close(FLUSH_TIMEOUT_MILLIS);
+    }
+
+    // serialised here on the main thread so the snapshot is consistent; written in the background
+    private long save() {
+        return writer.submit(data.saveToString());
     }
 }

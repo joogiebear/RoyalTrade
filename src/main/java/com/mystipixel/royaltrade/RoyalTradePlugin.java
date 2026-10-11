@@ -54,7 +54,11 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
         messages = new MessageManager(getDataFolder(), getLogger());
         economy = new EconomyHook();
-        escrow = new Escrow(getDataFolder(), getLogger());
+        escrow = new Escrow(getDataFolder(), getLogger(), task -> {
+            if (isEnabled()) {
+                getServer().getScheduler().runTask(this, task);
+            }
+        });
         log = new TradeLog(getDataFolder(), getLogger());
         toggles = new com.mystipixel.royaltrade.data.TradeToggles(getDataFolder(), getLogger());
 
@@ -125,6 +129,9 @@ public final class RoyalTradePlugin extends JavaPlugin {
         // cancel open trades so escrow is returned or queued, not left only in memory
         for (TradeSession session : trades == null ? java.util.List.<TradeSession>of() : trades.active()) {
             trades.cancel(session);
+        }
+        if (escrow != null) {
+            escrow.close();
         }
     }
 
