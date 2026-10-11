@@ -102,6 +102,11 @@ an item-for-item trade, which carries no coin amount, still shows what moved.
 When EconGuard's `enforcement.block-flagged-trades` is on, a flagged player cannot send, accept or
 complete a trade. The other player is only told they can't trade with that person right now.
 
+**RoyalSkyblock** (2026.41.2 or newer) is asked to save both players' profiles as soon as a trade
+completes. RoyalSkyblock keeps inventories in its own profile store, so without this a crash before its
+next autosave could hand one side's items back. Older versions without the save call log one warning
+and trades carry on as before.
+
 ---
 
 ## Audit

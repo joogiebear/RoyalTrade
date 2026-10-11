@@ -6,9 +6,11 @@ author: Mystipixel
 description: Player-to-player trading that cannot be changed after both sides agree.
 # Vault provides the money half; without it items still trade and coins are refused.
 # EconGuard, when present, receives every completed trade.
+# RoyalSkyblock, when present, saves both players' profiles after each completed trade.
 softdepend:
   - Vault
   - EconGuard
+  - RoyalSkyblock
 commands:
   trade:
     description: Trade with another player.

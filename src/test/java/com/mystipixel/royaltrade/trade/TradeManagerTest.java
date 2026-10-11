@@ -22,6 +22,7 @@ class TradeManagerTest {
     Escrow escrow;
     TradeLog log;
     EconGuardHook guard;
+    SkyblockSaveHook skyblock;
     TradeManager manager;
     Player a, b;
     TradeSession session;
@@ -31,8 +32,9 @@ class TradeManagerTest {
     @BeforeEach void setup() {
         economy = mock(EconomyHook.class); escrow = mock(Escrow.class);
         log = mock(TradeLog.class); guard = mock(EconGuardHook.class);
+        skyblock = mock(SkyblockSaveHook.class);
         journal = new PaymentJournal(folder.resolve("payments"), java.util.logging.Logger.getLogger("test"));
-        manager = new TradeManager(economy, escrow, log, guard, journal, java.util.logging.Logger.getLogger("test"));
+        manager = new TradeManager(economy, escrow, log, guard, skyblock, journal, java.util.logging.Logger.getLogger("test"));
         a = player("a"); b = player("b");
         bukkit = mockStatic(Bukkit.class);
         bukkit.when(() -> Bukkit.getPlayer(a.getUniqueId())).thenReturn(a);
@@ -75,6 +77,7 @@ class TradeManagerTest {
         verify(b.getInventory(), never()).addItem(any(ItemStack[].class));
         verifyNoInteractions(log);
         verify(guard, never()).observe(any(), any(), anyDouble(), anyDouble(), anyList(), anyList());
+        verifyNoInteractions(skyblock);
     }
     @Test void failedRefundCannotBeRetriedAsANewChargeOrCancelledForItems() {
         when(economy.withdraw(b, 20)).thenReturn(false);
@@ -95,6 +98,21 @@ class TradeManagerTest {
         verify(economy).deposit(a, 20); verify(economy).deposit(b, 10);
         verify(b.getInventory()).addItem(any(ItemStack[].class));
     }
+    @Test void settledTradeSavesBothSkyblockProfilesAfterTheReceiptCloses() {
+        doAnswer(call -> {
+            assertEquals(TradeSession.State.COMPLETED, session.state());
+            assertTrue(journal.pending().isEmpty(), "profile saved while the receipt was still open");
+            verify(b.getInventory()).addItem(any(ItemStack[].class));
+            return null;
+        }).when(skyblock).saveNow(any(UUID[].class));
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        verify(skyblock).saveNow(a.getUniqueId(), b.getUniqueId());
+    }
+    @Test void heldTradeDoesNotSaveSkyblockProfiles() {
+        when(economy.deposit(b, 10)).thenReturn(false);
+        assertEquals(TradeManager.Failure.RECOVERY_REQUIRED, manager.commit(session));
+        verifyNoInteractions(skyblock);
+    }
     @Test void successfulRefundAllowsFreshAttemptWithoutDoubleCharging() {
         when(economy.withdraw(b, 20)).thenReturn(false, true);
         assertEquals(TradeManager.Failure.ECONOMY_ERROR, manager.commit(session));
@@ -114,7 +132,7 @@ class TradeManagerTest {
         assertEquals("REJECTED", record.getProperty("leg.credit-b.status"));
         journal.close();
         PaymentJournal reopened = new PaymentJournal(folder.resolve("payments"), java.util.logging.Logger.getLogger("test"));
-        TradeManager restarted = new TradeManager(economy, escrow, log, guard,
+        TradeManager restarted = new TradeManager(economy, escrow, log, guard, mock(SkyblockSaveHook.class),
                 reopened, java.util.logging.Logger.getLogger("test"));
         reopened.close();
         assertTrue(restarted.needsRecovery(a)); assertTrue(restarted.inTrade(b));
