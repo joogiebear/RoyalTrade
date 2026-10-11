@@ -1,3 +1,16 @@
+## 2026.41.0 - 2026-10-10
+
+### Fixes
+- use the ISO week-year for release versions (`4cb68d8`)
+
+### Refactors
+- read all player-facing text from config (`2e3839f`)
+- replace the sign input with a native text dialog (`1d5707d`)
+
+### Documentation
+- add AGENTS.md with the suite's development standards (`a5de5a3`)
+- say a crash between the two writes can duplicate (`d6fd22d`)
+
 ## 2026.39.1 — 2026-09-24
 
 ### ✨ Features
