@@ -1,3 +1,8 @@
+## 2026.41.2 - 2026-10-11
+
+### Fixes
+- write the payment journal off the main thread (`012ea3c`)
+
 ## 2026.41.1 - 2026-10-11
 
 ### Fixes
