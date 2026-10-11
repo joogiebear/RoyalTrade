@@ -212,5 +212,19 @@ class TradeManagerTest {
         assertEquals(TradeManager.Failure.NONE, manager.commit(session));
         assertEquals(TradeSession.State.COMPLETED, session.state());
     }
-
+    @Test void settlementResolvesPlayersByUuidSoARelogGetsTheLiveObject() {
+        Player rejoinedB = player("b");
+        bukkit.when(() -> Bukkit.getPlayer(b.getUniqueId())).thenReturn(rejoinedB);
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        verify(rejoinedB.getInventory()).addItem(any(ItemStack[].class));
+        verify(b.getInventory(), never()).addItem(any(ItemStack[].class));
+        verify(economy).deposit(rejoinedB, 10);
+    }
+    @Test void settlementWithAPlayerGoneMovesNothing() {
+        bukkit.when(() -> Bukkit.getPlayer(b.getUniqueId())).thenReturn(null);
+        assertEquals(TradeManager.Failure.OFFLINE, manager.commit(session));
+        verifyNoInteractions(economy);
+        assertTrue(journal.pending().isEmpty());
+        assertEquals(1, session.a().offered().size());
+    }
 }

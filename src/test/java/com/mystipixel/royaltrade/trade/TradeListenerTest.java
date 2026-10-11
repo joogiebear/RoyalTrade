@@ -7,6 +7,11 @@ import com.mystipixel.royaltrade.hooks.EconomyHook;
 import com.mystipixel.royaltrade.message.MessageManager;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.scheduler.BukkitScheduler;
+import com.mystipixel.royaltrade.data.Escrow;
+import org.bukkit.inventory.ItemStack;
+import java.util.List;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
@@ -121,5 +126,37 @@ class TradeListenerTest {
         listener.onClose(closeOf(a, mock(Inventory.class)));
         verify(trades, never()).cancel(any());
         verify(a, never()).openInventory(any(Inventory.class));
+    }
+
+    private Runnable joinDelivery(Player joined, Escrow escrow) {
+        when(plugin.escrow()).thenReturn(escrow);
+        when(escrow.pendingFor(joined.getUniqueId())).thenReturn(List.of(mock(ItemStack.class)));
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
+        listener.onJoin(new PlayerJoinEvent(joined, (net.kyori.adventure.text.Component) null));
+        ArgumentCaptor<Runnable> task = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runTaskLater(eq(plugin), task.capture(), eq(20L));
+        return task.getValue();
+    }
+    @Test void relogInsideTheDelayDoesNotDeliverToTheOldPlayerObject() {
+        Escrow escrow = mock(Escrow.class);
+        Runnable firstJoin = joinDelivery(a, escrow);
+        Player rejoined = player("a");
+        bukkit.when(() -> Bukkit.getPlayer(a.getUniqueId())).thenReturn(rejoined);
+        firstJoin.run();
+        verify(escrow, never()).deliver(any());
+    }
+    @Test void quitInsideTheDelayLeavesTheItemsOwed() {
+        Escrow escrow = mock(Escrow.class);
+        Runnable task = joinDelivery(a, escrow);
+        bukkit.when(() -> Bukkit.getPlayer(a.getUniqueId())).thenReturn(null);
+        task.run();
+        verify(escrow, never()).deliver(any());
+    }
+    @Test void stillOnlineAfterTheDelayGetsTheItems() {
+        Escrow escrow = mock(Escrow.class);
+        when(escrow.deliver(a)).thenReturn(1);
+        joinDelivery(a, escrow).run();
+        verify(escrow).deliver(a);
     }
 }
