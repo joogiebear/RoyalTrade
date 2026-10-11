@@ -49,6 +49,8 @@ public final class TradeManager {
     private final Map<UUID, TradeSession> byPlayer = new HashMap<>();
     private final Map<UUID, TradeSession> byId = new HashMap<>();
     private final Map<TradeSession, UUID> ids = new HashMap<>();
+    // player -> the escrow write that must be on disk before their data is saved
+    private final Map<UUID, Long> savesDue = new HashMap<>();
     // target -> (requester -> sent at); several per target so a second request can't wipe the first
     private final Map<UUID, Map<UUID, Long>> requests = new HashMap<>();
 
@@ -92,18 +94,43 @@ public final class TradeManager {
     }
 
     /**
-     * Write escrow, then the players' data, so a crash can't restore an escrowed item from a stale
-     * player save. Escrow first: a crash between the writes duplicates rather than loses. Items
-     * leaving escrow need the reverse order (save the inventory first). Runs on the main thread.
+     * Queue the escrow write, and save both players' data once it is on disk, so a crash can't restore
+     * an escrowed item from a stale player save. Escrow first: a crash between the writes duplicates
+     * rather than loses. Items leaving escrow need the reverse order (save the inventory first).
      */
     public void persist(TradeSession session) {
         UUID id = ids.get(session);
         if (id == null) {
             return;
         }
-        escrow.hold(id, Map.of(session.a().playerId(), session.a().offered(),
-                session.b().playerId(), session.b().offered()));
+        long seq = holdEscrow(id, session);
+        savesDue.merge(session.a().playerId(), seq, Math::max);
+        savesDue.merge(session.b().playerId(), seq, Math::max);
+        escrow.whenDurable(seq, this::saveDue);
+    }
+
+    // settlement: nothing may leave a player until escrow is on disk
+    private void persistNow(UUID id, TradeSession session) {
+        holdEscrow(id, session);
+        escrow.flush();
         saveInventories(session);
+    }
+
+    private long holdEscrow(UUID id, TradeSession session) {
+        return escrow.hold(id, Map.of(session.a().playerId(), session.a().offered(),
+                session.b().playerId(), session.b().offered()));
+    }
+
+    // a player whose escrow changed again since waits for that newer write
+    private void saveDue() {
+        long durable = escrow.durableSeq();
+        savesDue.entrySet().removeIf(due -> {
+            if (due.getValue() > durable) {
+                return false;
+            }
+            saveInventory(Bukkit.getPlayer(due.getKey()));
+            return true;
+        });
     }
 
     /** Write a player's data now so it agrees with escrow. A failed save is logged, not thrown. */
@@ -129,7 +156,13 @@ public final class TradeManager {
         UUID id = ids.get(session);
         if (id != null) {
             escrow.release(id);
-            ids.remove(session);
+        }
+        unregister(session);
+    }
+
+    private void unregister(TradeSession session) {
+        UUID id = ids.remove(session);
+        if (id != null) {
             byId.remove(id);
         }
         byPlayer.remove(session.a().playerId());
@@ -244,7 +277,7 @@ public final class TradeManager {
         UUID id = ids.get(session);
         UUID attempt = UUID.randomUUID();
         try {
-            persist(session);
+            persistNow(id, session);
             payments.begin(attempt, pa.getUniqueId(), pb.getUniqueId(), "trade:" + id);
         } catch (RuntimeException e) {
             logger.log(java.util.logging.Level.SEVERE, "Cannot persist trade intent; no payment attempted", e);
@@ -282,7 +315,10 @@ public final class TradeManager {
             // before escrow is released, see persist()
             saveInventory(pa);
             saveInventory(pb);
-            forget(session); // Strict escrow persistence must succeed before closing the receipt.
+            // the release must be on disk before the receipt closes
+            escrow.release(id);
+            escrow.flush();
+            unregister(session);
             payments.complete(attempt);
             session.markCompleted();
         } catch (RuntimeException e) {

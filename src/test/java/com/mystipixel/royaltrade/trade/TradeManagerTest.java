@@ -193,6 +193,38 @@ class TradeManagerTest {
         order.verify(b).saveData();
         order.verify(escrow).release(any());
     }
+    @Test void settlementWaitsForEscrowOnDiskBeforeTheFirstDebit() {
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        InOrder order = inOrder(escrow, a, economy);
+        order.verify(escrow).hold(any(), anyMap());
+        order.verify(escrow).flush();
+        order.verify(a).saveData();
+        order.verify(economy).withdraw(a, 10);
+    }
+    @Test void anEscrowThatCannotReachDiskMovesNothing() {
+        doThrow(new java.io.UncheckedIOException(new java.io.IOException("disk full"))).when(escrow).flush();
+        assertEquals(TradeManager.Failure.ECONOMY_ERROR, manager.commit(session));
+        verify(economy, never()).withdraw(any(), anyDouble());
+        verify(b.getInventory(), never()).addItem(any(ItemStack[].class));
+        assertTrue(journal.pending().isEmpty());
+        assertEquals(1, session.a().offered().size());
+    }
+    @Test void theReleaseIsOnDiskBeforeTheReceiptCloses() {
+        List<Integer> openReceiptsAtFlush = new ArrayList<>();
+        doAnswer(call -> { openReceiptsAtFlush.add(journal.pending().size()); return null; }).when(escrow).flush();
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        InOrder order = inOrder(escrow);
+        order.verify(escrow).release(any());
+        order.verify(escrow).flush();
+        assertEquals(List.of(0, 1), openReceiptsAtFlush);    // before begin, then with the receipt still open
+        assertTrue(journal.pending().isEmpty());
+    }
+    @Test void aReleaseThatCannotReachDiskHoldsTheTradeForRecovery() {
+        doNothing().doThrow(new java.io.UncheckedIOException(new java.io.IOException("disk full"))).when(escrow).flush();
+        assertEquals(TradeManager.Failure.RECOVERY_REQUIRED, manager.commit(session));
+        assertFalse(journal.pending().isEmpty());
+        assertTrue(manager.needsRecovery(a));
+    }
     @Test void cancelSavesTheReturnedInventoryBeforeReleasingEscrow() {
         manager.cancel(session);
         InOrder order = inOrder(a.getInventory(), a, escrow);
@@ -200,12 +232,17 @@ class TradeManagerTest {
         order.verify(a).saveData();
         order.verify(escrow).release(any());
     }
-    @Test void persistWritesEscrowBeforeThePlayerSave() {
+    @Test void persistSavesThePlayersOnlyOnceTheEscrowWriteIsOnDisk() {
+        when(escrow.hold(any(), anyMap())).thenReturn(1L);
         manager.persist(session);
-        InOrder order = inOrder(escrow, a);
-        order.verify(escrow).hold(any(), anyMap());
-        order.verify(a).saveData();
-        verify(escrow, times(1)).hold(any(), anyMap());      // one flush for both sides
+        verify(escrow, times(1)).hold(any(), anyMap());      // one write for both sides
+        verify(a, never()).saveData();
+        org.mockito.ArgumentCaptor<Runnable> landed = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+        verify(escrow).whenDurable(eq(1L), landed.capture());
+        when(escrow.durableSeq()).thenReturn(1L);
+        landed.getValue().run();
+        verify(a).saveData();
+        verify(b).saveData();
     }
     @Test void aFailedPlayerSaveDoesNotFailTheTrade() {
         doThrow(new IllegalStateException("disk full")).when(a).saveData();
