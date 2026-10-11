@@ -1,5 +1,6 @@
 package com.mystipixel.royaltrade.data;
 
+import com.mystipixel.royaltrade.util.BackgroundWriter;
 import com.mystipixel.royaltrade.util.DataFiles;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -32,7 +33,7 @@ public final class Escrow {
     private final File file;
     private final Logger logger;
     private final Executor mainThread;
-    private final EscrowWriter writer;
+    private final BackgroundWriter<String> writer;
     private YamlConfiguration data;
     // false until load succeeds, so a failed load never writes an empty store over the real one
     private boolean loaded;
@@ -41,7 +42,8 @@ public final class Escrow {
         this.file = new File(dataFolder, "escrow.yml");
         this.logger = logger;
         this.mainThread = mainThread;
-        this.writer = new EscrowWriter(snapshot -> DataFiles.write(file.toPath(), snapshot), logger);
+        this.writer = new BackgroundWriter<>("escrow.yml", "RoyalTrade-escrow-writer",
+                snapshot -> DataFiles.write(file.toPath(), snapshot), (queued, newer) -> newer, logger);
     }
 
     /**

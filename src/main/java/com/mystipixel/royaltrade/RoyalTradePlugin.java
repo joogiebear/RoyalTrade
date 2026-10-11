@@ -31,6 +31,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
     private EconomyHook economy;
     private EconGuardHook econGuard;
     private Escrow escrow;
+    private com.mystipixel.royaltrade.data.PaymentJournal payments;
     private TradeLog log;
     private TradeManager trades;
     private TradeGui gui;
@@ -62,10 +63,9 @@ public final class RoyalTradePlugin extends JavaPlugin {
         log = new TradeLog(getDataFolder(), getLogger());
         toggles = new com.mystipixel.royaltrade.data.TradeToggles(getDataFolder(), getLogger());
 
-        com.mystipixel.royaltrade.data.PaymentJournal payments;
         int recovered;
         try {
-            payments = new com.mystipixel.royaltrade.data.PaymentJournal(getDataFolder().toPath().resolve("payments"));
+            payments = new com.mystipixel.royaltrade.data.PaymentJournal(getDataFolder().toPath().resolve("payments"), getLogger());
             java.util.Set<java.util.UUID> heldSessions = new java.util.HashSet<>();
             for (var record : payments.pending().values()) {
                 String reason = record.getProperty("reason");
@@ -132,6 +132,9 @@ public final class RoyalTradePlugin extends JavaPlugin {
         }
         if (escrow != null) {
             escrow.close();
+        }
+        if (payments != null) {
+            payments.close();
         }
     }
 

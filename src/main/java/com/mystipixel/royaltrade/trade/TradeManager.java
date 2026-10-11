@@ -278,8 +278,15 @@ public final class TradeManager {
         UUID attempt = UUID.randomUUID();
         try {
             persistNow(id, session);
+        } catch (RuntimeException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Cannot persist trade intent; no payment attempted", e);
+            return Failure.ECONOMY_ERROR;
+        }
+        try {
             payments.begin(attempt, pa.getUniqueId(), pb.getUniqueId(), "trade:" + id);
         } catch (RuntimeException e) {
+            // a timed-out write may still land; nothing was paid, so it must not hold the players later
+            payments.discard(attempt);
             logger.log(java.util.logging.Level.SEVERE, "Cannot persist trade intent; no payment attempted", e);
             return Failure.ECONOMY_ERROR;
         }
@@ -333,6 +340,7 @@ public final class TradeManager {
     }
 
     private Failure holdRecovery(TradeSession session, UUID attempt, RuntimeException cause) {
+        payments.writeLater(attempt);
         session.markRecovery();
         recoveryPlayers.add(session.a().playerId());
         recoveryPlayers.add(session.b().playerId());

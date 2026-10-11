@@ -1,4 +1,4 @@
-package com.mystipixel.royaltrade.data;
+package com.mystipixel.royaltrade.util;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -15,16 +15,16 @@ import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class EscrowWriterTest {
+class BackgroundWriterTest {
     final List<String> written = Collections.synchronizedList(new ArrayList<>());
     final CountDownLatch started = new CountDownLatch(1);
     final CountDownLatch release = new CountDownLatch(1);
-    EscrowWriter writer;
+    BackgroundWriter<String> writer;
 
     // the first write blocks until release, so later submits pile up behind it
-    private EscrowWriter blockingWriter() {
+    private BackgroundWriter<String> blockingWriter() {
         AtomicBoolean first = new AtomicBoolean(true);
-        return new EscrowWriter(data -> {
+        return snapshots(data -> {
             if (first.getAndSet(false)) {
                 started.countDown();
                 try {
@@ -35,6 +35,11 @@ class EscrowWriterTest {
             }
             written.add(data);
         }, Logger.getLogger("test"));
+    }
+
+    // escrow's use: each write is a full snapshot, so the newer one replaces a queued one
+    private static BackgroundWriter<String> snapshots(BackgroundWriter.Sink<String> sink, Logger logger) {
+        return new BackgroundWriter<>("test.yml", "test-writer", sink, (queued, newer) -> newer, logger);
     }
 
     @AfterEach void stop() {
@@ -56,7 +61,7 @@ class EscrowWriterTest {
     }
 
     @Test void writesLandInSubmissionOrderAndEndOnTheNewest() {
-        writer = new EscrowWriter(data -> {
+        writer = snapshots(data -> {
             written.add(data);
             Thread.onSpinWait();
         }, Logger.getLogger("test"));
@@ -97,7 +102,7 @@ class EscrowWriterTest {
 
     @Test void aFailedWriteIsReportedAndTheNextChangeRetries() {
         AtomicBoolean fail = new AtomicBoolean(true);
-        writer = new EscrowWriter(data -> {
+        writer = snapshots(data -> {
             if (fail.get()) throw new IOException("disk full");
             written.add(data);
         }, Logger.getLogger("test"));
@@ -128,7 +133,7 @@ class EscrowWriterTest {
     }
 
     @Test void aCallbackForAWriteAlreadyOnDiskRunsAtOnce() {
-        writer = new EscrowWriter(written::add, Logger.getLogger("test"));
+        writer = snapshots(written::add, Logger.getLogger("test"));
         long seq = writer.submit("1");
         writer.await(seq, 5_000);
         AtomicBoolean ran = new AtomicBoolean();
@@ -137,11 +142,34 @@ class EscrowWriterTest {
     }
 
     @Test void aThrowingCallbackDoesNotStopLaterWrites() {
-        writer = new EscrowWriter(written::add, Logger.getLogger("test"));
+        writer = snapshots(written::add, Logger.getLogger("test"));
         long seq = writer.submit("1");
         writer.whenDurable(seq + 1, () -> { throw new IllegalStateException("plugin disabled"); });
         writer.await(writer.submit("2"), 5_000);
         writer.await(writer.submit("3"), 5_000);
         assertEquals("3", written.get(written.size() - 1));
+    }
+
+    @Test void aMergingWriterWritesTheQueuedChangesTogether() throws Exception {
+        AtomicBoolean first = new AtomicBoolean(true);
+        BackgroundWriter<String> merging = new BackgroundWriter<>("test", "test-writer", data -> {
+            if (first.getAndSet(false)) {
+                started.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    throw new IOException(e);
+                }
+            }
+            written.add(data);
+        }, (queued, newer) -> queued + newer, Logger.getLogger("test"));
+        writer = merging;
+        merging.submit("a");
+        assertTrue(started.await(5, TimeUnit.SECONDS));
+        merging.submit("b");
+        long last = merging.submit("c");
+        release.countDown();
+        merging.await(last, 5_000);
+        assertEquals(List.of("a", "bc"), written);
     }
 }

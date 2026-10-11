@@ -17,6 +17,21 @@ public final class DataFiles {
 
     /** Writes a synced sibling and moves it over {@code target}, so a crash never leaves half a file. */
     public static void write(Path target, String data) throws IOException {
+        Path temp = writeSibling(target, data);
+        try {
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException notAtomic) {
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /** Like {@link #write}, but fails instead of falling back to a move that is not atomic. */
+    public static void writeAtomically(Path target, String data) throws IOException {
+        Path temp = writeSibling(target, data);
+        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    private static Path writeSibling(Path target, String data) throws IOException {
         Path temp = target.resolveSibling(target.getFileName() + ".tmp");
         Path parent = target.toAbsolutePath().getParent();
         if (parent != null) {
@@ -30,10 +45,6 @@ public final class DataFiles {
             }
             channel.force(true);
         }
-        try {
-            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException notAtomic) {
-            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-        }
+        return temp;
     }
 }
