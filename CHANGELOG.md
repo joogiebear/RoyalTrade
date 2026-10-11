@@ -1,3 +1,11 @@
+## 2026.41.1 - 2026-10-11
+
+### Fixes
+- skip returned-item delivery to a player object left over from a relog (`4b3a98d`)
+
+### Performance
+- write escrow on a background thread and coalesce changes (`fede0ef`)
+
 ## 2026.41.0 - 2026-10-10
 
 ### Fixes
