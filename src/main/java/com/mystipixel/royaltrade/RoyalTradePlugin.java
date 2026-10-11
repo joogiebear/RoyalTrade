@@ -8,6 +8,7 @@ import com.mystipixel.royaltrade.gui.TradeGui;
 import com.mystipixel.royaltrade.gui.TradeMenu;
 import com.mystipixel.royaltrade.hooks.EconGuardHook;
 import com.mystipixel.royaltrade.hooks.EconomyHook;
+import com.mystipixel.royaltrade.hooks.SkyblockSaveHook;
 import com.mystipixel.royaltrade.message.MessageManager;
 import com.mystipixel.royaltrade.trade.TradeListener;
 import com.mystipixel.royaltrade.trade.TradeManager;
@@ -30,6 +31,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
     private MessageManager messages;
     private EconomyHook economy;
     private EconGuardHook econGuard;
+    private SkyblockSaveHook skyblockSave;
     private Escrow escrow;
     private com.mystipixel.royaltrade.data.PaymentJournal payments;
     private TradeLog log;
@@ -86,7 +88,8 @@ public final class RoyalTradePlugin extends JavaPlugin {
         }
 
         econGuard = new EconGuardHook();
-        trades = new TradeManager(economy, escrow, log, econGuard, payments, getLogger());
+        skyblockSave = new SkyblockSaveHook(getLogger());
+        trades = new TradeManager(economy, escrow, log, econGuard, skyblockSave, payments, getLogger());
         gui = new TradeGui(economy, this::settleMillis, this::confirmDelayMillis,
                 TradeMenu.load(getDataFolder(), getLogger()));
         textInput = new TextInput(this, messages);
@@ -99,6 +102,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(command, this);
         getServer().getPluginManager().registerEvents(new TradeListener(this), this);
         getServer().getPluginManager().registerEvents(textInput, this);
+        getServer().getPluginManager().registerEvents(skyblockSave, this);
 
         // once a second is enough: the settle window is measured in seconds
         getServer().getScheduler().runTaskTimer(this, this::tickSettling, 20L, 20L);
@@ -156,6 +160,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         readConfig();
         messages.reload();
         gui.setMenu(TradeMenu.load(getDataFolder(), getLogger()));
+        skyblockSave.reset();
     }
 
     // completes trades whose settle window has elapsed; TradeSession refuses edits while settling

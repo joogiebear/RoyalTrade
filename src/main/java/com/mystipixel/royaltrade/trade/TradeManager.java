@@ -8,6 +8,7 @@ import java.util.logging.Logger;
 import com.mystipixel.royaltrade.data.TradeLog;
 import com.mystipixel.royaltrade.hooks.EconGuardHook;
 import com.mystipixel.royaltrade.hooks.EconomyHook;
+import com.mystipixel.royaltrade.hooks.SkyblockSaveHook;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
@@ -45,6 +46,7 @@ public final class TradeManager {
     private final Escrow escrow;
     private final TradeLog log;
     private final EconGuardHook econGuard;
+    private final SkyblockSaveHook skyblockSave;
 
     private final Map<UUID, TradeSession> byPlayer = new HashMap<>();
     private final Map<UUID, TradeSession> byId = new HashMap<>();
@@ -55,7 +57,7 @@ public final class TradeManager {
     private final Map<UUID, Map<UUID, Long>> requests = new HashMap<>();
 
     public TradeManager(EconomyHook economy, Escrow escrow, TradeLog log, EconGuardHook econGuard,
-                        PaymentJournal payments, Logger logger) {
+                        SkyblockSaveHook skyblockSave, PaymentJournal payments, Logger logger) {
         this.payments = payments;
         this.logger = logger;
         for (var record : payments.pending().values()) {
@@ -66,6 +68,7 @@ public final class TradeManager {
         this.escrow = escrow;
         this.log = log;
         this.econGuard = econGuard;
+        this.skyblockSave = skyblockSave;
     }
 
     public TradeSession sessionOf(Player player) {
@@ -331,6 +334,9 @@ public final class TradeManager {
         } catch (RuntimeException e) {
             return holdRecovery(session, attempt, e);
         }
+
+        // RoyalSkyblock keeps inventories in its own profile store, which player.saveData() doesn't cover
+        skyblockSave.saveNow(pa.getUniqueId(), pb.getUniqueId());
 
         // Reporting is after the fact and must never affect the trade.
         log.record(id, pa, pb, toB, toA, coinsA, coinsB);
