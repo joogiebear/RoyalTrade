@@ -69,6 +69,10 @@ window, because players trust it.
 convenience ones. Requiring players to stand together makes selling for real money less convenient,
 and a playtime floor makes a throwaway alt created to receive a main account's wealth cost something.
 
+All chat text is in `messages.yml`, and the trade window's title, layout, items and lore are in
+`gui/trade.yml`. A key missing from either file uses the default shipped in the jar, so files from
+an older version keep working without being rewritten.
+
 ---
 
 ## Commands

@@ -2,19 +2,17 @@ package com.mystipixel.royaltrade.gui;
 
 import com.mystipixel.royaltrade.hooks.EconomyHook;
 import com.mystipixel.royaltrade.trade.TradeSession;
-import com.mystipixel.royaltrade.util.Text;
 import org.bukkit.Bukkit;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 
 /**
  * The trade window. Each player gets their own inventory so "your offer" is always on the left;
@@ -22,59 +20,65 @@ import java.util.UUID;
  */
 public final class TradeGui {
 
-    public static final int SIZE = 54;
-
-    // rows 1-4, columns 1-4: your offer
-    public static final int[] MINE = {
-            0, 1, 2, 3,
-            9, 10, 11, 12,
-            18, 19, 20, 21,
-            27, 28, 29, 30
-    };
-    // rows 1-4, columns 6-9: the other side, read-only
-    public static final int[] THEIRS = {
-            5, 6, 7, 8,
-            14, 15, 16, 17,
-            23, 24, 25, 26,
-            32, 33, 34, 35
-    };
-
-    private static final int[] DIVIDER = {4, 13, 22, 31, 40, 49};
-    public static final int MY_COINS = 37;
-    public static final int THEIR_COINS = 43;
-    public static final int MY_CONFIRM = 47;
-    public static final int THEIR_CONFIRM = 51;
-    public static final int CLOSE = 45;
+    // a window keeps the layout it opened with, so a reload can't hide offered items mid-trade
+    private record View(Inventory inventory, TradeMenu menu) {
+    }
 
     private final EconomyHook economy;
-    private final java.util.function.LongSupplier settleMillis;
-    private final java.util.function.LongSupplier confirmDelayMillis;
-    private final Map<UUID, Inventory> views = new HashMap<>();
+    private final LongSupplier settleMillis;
+    private final LongSupplier confirmDelayMillis;
+    private final Map<UUID, View> views = new HashMap<>();
+    private TradeMenu menu;
 
-    public TradeGui(EconomyHook economy, java.util.function.LongSupplier settleMillis,
-                    java.util.function.LongSupplier confirmDelayMillis) {
+    public TradeGui(EconomyHook economy, LongSupplier settleMillis, LongSupplier confirmDelayMillis,
+                    TradeMenu menu) {
         this.economy = economy;
         this.settleMillis = settleMillis;
         this.confirmDelayMillis = confirmDelayMillis;
+        this.menu = menu;
+    }
+
+    /** The layout for trades opened from now on. */
+    public void setMenu(TradeMenu menu) {
+        this.menu = menu;
     }
 
     public Inventory viewOf(Player player) {
-        return views.get(player.getUniqueId());
+        View view = views.get(player.getUniqueId());
+        return view == null ? null : view.inventory();
     }
 
     public boolean isTradeView(Player player, Inventory inventory) {
-        Inventory mine = views.get(player.getUniqueId());
+        Inventory mine = viewOf(player);
         return mine != null && mine.equals(inventory);
     }
 
+    /** The button at a slot of this player's window, or null. */
+    public String buttonAt(Player player, int slot) {
+        View view = views.get(player.getUniqueId());
+        return view == null ? null : view.menu().buttonAt(slot);
+    }
+
+    /** Which index in the player's offer a slot of their window shows, or -1. */
+    public int offerIndex(Player player, int slot) {
+        View view = views.get(player.getUniqueId());
+        return view == null ? -1 : view.menu().myOfferIndex(slot);
+    }
+
+    public int offerCapacity(Player player) {
+        View view = views.get(player.getUniqueId());
+        return view == null ? 0 : view.menu().offerCapacity();
+    }
+
     public void open(TradeSession session, Player a, Player b) {
-        views.put(a.getUniqueId(), Bukkit.createInventory(null, SIZE,
-                Text.color("&8Trading with &f" + b.getName())));
-        views.put(b.getUniqueId(), Bukkit.createInventory(null, SIZE,
-                Text.color("&8Trading with &f" + a.getName())));
+        TradeMenu layout = menu;
+        views.put(a.getUniqueId(), new View(Bukkit.createInventory(null, layout.size(),
+                layout.title(Map.of("player", b.getName()))), layout));
+        views.put(b.getUniqueId(), new View(Bukkit.createInventory(null, layout.size(),
+                layout.title(Map.of("player", a.getName()))), layout));
         render(session);
-        a.openInventory(views.get(a.getUniqueId()));
-        b.openInventory(views.get(b.getUniqueId()));
+        a.openInventory(viewOf(a));
+        b.openInventory(viewOf(b));
     }
 
     public void forget(Player player) {
@@ -88,38 +92,26 @@ public final class TradeGui {
     }
 
     private void drawFor(TradeSession session, TradeSession.Side viewer) {
-        Inventory inv = views.get(viewer.playerId());
-        if (inv == null) {
+        View view = views.get(viewer.playerId());
+        if (view == null) {
             return;
         }
+        Inventory inv = view.inventory();
+        TradeMenu layout = view.menu();
         TradeSession.Side them = session.other(viewer);
         inv.clear();
 
-        ItemStack filler = pane(Material.BLACK_STAINED_GLASS_PANE, " ");
-        for (int i = 0; i < SIZE; i++) {
-            inv.setItem(i, filler);
+        for (int i = 0; i < inv.getSize(); i++) {
+            TradeMenu.Look filler = layout.maskAt(i);
+            inv.setItem(i, filler == null ? null : item(filler.fill(Map.of())));
         }
-        for (int slot : DIVIDER) {
-            inv.setItem(slot, pane(Material.GRAY_STAINED_GLASS_PANE, " "));
-        }
-        for (int slot : MINE) {
-            inv.setItem(slot, null);
-        }
-        for (int slot : THEIRS) {
-            inv.setItem(slot, null);
-        }
+        fill(inv, layout.myOffer(), viewer.offered());
+        fill(inv, layout.theirOffer(), them.offered());
 
-        List<ItemStack> mine = viewer.offered();
-        for (int i = 0; i < MINE.length && i < mine.size(); i++) {
-            inv.setItem(MINE[i], mine.get(i));
-        }
-        List<ItemStack> theirs = them.offered();
-        for (int i = 0; i < THEIRS.length && i < theirs.size(); i++) {
-            inv.setItem(THEIRS[i], theirs.get(i));
-        }
-
-        inv.setItem(MY_COINS, coinItem("&eYour offer", viewer.coins(), true));
-        inv.setItem(THEIR_COINS, coinItem("&eTheir offer", them.coins(), false));
+        place(inv, layout, TradeMenu.MY_COINS, coinState(viewer.coins()),
+                Map.of("amount", economy.format(viewer.coins())));
+        place(inv, layout, TradeMenu.THEIR_COINS, coinState(them.coins()),
+                Map.of("amount", economy.format(them.coins())));
 
         boolean settling = session.state() == TradeSession.State.SETTLING;
         long secondsLeft = 0;
@@ -128,83 +120,58 @@ public final class TradeGui {
             secondsLeft = Math.max(1, (settleMillis.getAsLong() - elapsed + 999) / 1000);
         }
         long blocked = session.confirmBlockedFor(System.currentTimeMillis(), confirmDelayMillis.getAsLong());
-        inv.setItem(MY_CONFIRM, settling || blocked <= 0
-                ? confirmItem(viewer.confirmed(), true, settling, secondsLeft)
-                : named(Material.ORANGE_DYE, "&6Offer changed: confirm in " + ((blocked + 999) / 1000) + "s",
-                        List.of("&7Check both sides before you confirm.")));
-        inv.setItem(THEIR_CONFIRM, confirmItem(them.confirmed(), false, settling, secondsLeft));
-        inv.setItem(CLOSE, named(Material.BARRIER, "&cCancel trade",
-                List.of("&7Nothing changes hands.", "&7Your items come straight back.")));
-    }
-
-    private ItemStack coinItem(String title, double amount, boolean own) {
-        List<String> lore = new ArrayList<>();
-        lore.add("&f" + economy.format(amount));
-        lore.add("");
-        if (own) {
-            lore.add("&eClick to change");
-            lore.add("&8Changing this clears both confirmations.");
-        } else {
-            lore.add("&8What they are putting in.");
-        }
-        return named(amount > 0 ? Material.GOLD_INGOT : Material.GOLD_NUGGET, title, lore);
-    }
-
-    private ItemStack confirmItem(boolean confirmed, boolean own, boolean settling, long secondsLeft) {
+        // live countdowns, re-rendered each second; a static label reads as a hang
+        Map<String, String> countdown = Map.of("seconds", String.valueOf(secondsLeft));
         if (settling) {
-            // live countdown, re-rendered each second; a static label reads as a hang
-            return named(Material.CLOCK, "&6Completing in " + secondsLeft + "s…",
-                    List.of("&7Both sides have confirmed.", "&7The trade is locked while it settles."));
+            place(inv, layout, TradeMenu.MY_CONFIRM, "settling", countdown);
+        } else if (blocked > 0) {
+            place(inv, layout, TradeMenu.MY_CONFIRM, "waiting",
+                    Map.of("seconds", String.valueOf((blocked + 999) / 1000)));
+        } else {
+            place(inv, layout, TradeMenu.MY_CONFIRM, viewer.confirmed() ? "confirmed" : "unconfirmed", Map.of());
         }
-        if (own) {
-            return confirmed
-                    ? named(Material.LIME_DYE, "&aYou have confirmed",
-                    List.of("&7Waiting for the other player.", "", "&eClick to take it back"))
-                    : named(Material.GRAY_DYE, "&7Confirm trade",
-                    List.of("&7Check the right-hand side first.", "", "&eClick to confirm"));
-        }
-        return confirmed
-                ? named(Material.LIME_DYE, "&aThey have confirmed", List.of("&7Waiting on you."))
-                : named(Material.GRAY_DYE, "&7They have not confirmed", List.of("&7Give them a moment."));
+        place(inv, layout, TradeMenu.THEIR_CONFIRM,
+                settling ? "settling" : them.confirmed() ? "confirmed" : "unconfirmed", countdown);
+        place(inv, layout, TradeMenu.CANCEL, TradeMenu.PLAIN, Map.of());
     }
 
-    private ItemStack pane(Material material, String name) {
-        return named(material, name, List.of());
+    private static String coinState(double amount) {
+        return amount > 0 ? "some" : "none";
     }
 
-    private ItemStack named(Material material, String name, List<String> lore) {
-        ItemStack stack = new ItemStack(material);
+    private static void fill(Inventory inv, int[] slots, List<ItemStack> offered) {
+        for (int slot : slots) {
+            if (slot < inv.getSize()) {
+                inv.setItem(slot, null);
+            }
+        }
+        for (int i = 0; i < slots.length && i < offered.size(); i++) {
+            if (slots[i] < inv.getSize()) {
+                inv.setItem(slots[i], offered.get(i));
+            }
+        }
+    }
+
+    private static void place(Inventory inv, TradeMenu layout, String button, String state,
+                              Map<String, String> placeholders) {
+        int slot = layout.slotOf(button);
+        if (slot >= 0 && slot < inv.getSize()) {
+            inv.setItem(slot, item(layout.look(button, state).fill(placeholders)));
+        }
+    }
+
+    private static ItemStack item(TradeMenu.Look look) {
+        ItemStack stack = new ItemStack(look.material());
         ItemMeta meta = stack.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(Text.color(name));
-            if (!lore.isEmpty()) {
-                List<String> coloured = new ArrayList<>(lore.size());
-                for (String line : lore) {
-                    coloured.add(Text.color(line));
-                }
-                meta.setLore(coloured);
+            if (look.name() != null) {
+                meta.setDisplayName(look.name());
+            }
+            if (!look.lore().isEmpty()) {
+                meta.setLore(look.lore());
             }
             stack.setItemMeta(meta);
         }
         return stack;
-    }
-
-    /** Which index in a side's offer a clicked slot maps to, or -1 if it is not an offer slot. */
-    public static int mineIndex(int slot) {
-        for (int i = 0; i < MINE.length; i++) {
-            if (MINE[i] == slot) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    public static boolean isTheirs(int slot) {
-        for (int s : THEIRS) {
-            if (s == slot) {
-                return true;
-            }
-        }
-        return false;
     }
 }

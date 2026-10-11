@@ -1,87 +1,29 @@
 package com.mystipixel.royaltrade.message;
 
+import com.mystipixel.royaltrade.util.Bundled;
 import com.mystipixel.royaltrade.util.Text;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Every user-facing string, in messages.yml. Defaults also live here so keys added in later versions
- * work with an older messages.yml.
+ * Player-facing text from {@code messages.yml}. The jar's copy backs every key the server's file
+ * lacks; the server's file is never rewritten.
  */
 public final class MessageManager {
 
-    private static final Map<String, String> DEFAULTS = new LinkedHashMap<>();
-
-    static {
-        DEFAULTS.put("prefix", "&6Trade &8» &r");
-        DEFAULTS.put("player-only", "&cOnly players can trade.");
-        DEFAULTS.put("usage", "&7Usage: &f/trade <player>");
-        DEFAULTS.put("no-such-player", "&cThat player is not online.");
-        DEFAULTS.put("cannot-trade-self", "&cYou cannot trade with yourself.");
-        DEFAULTS.put("already-trading", "&cYou are already in a trade.");
-        DEFAULTS.put("they-are-trading", "&c{player} is already in a trade.");
-        DEFAULTS.put("too-far", "&c{player} is too far away.");
-        DEFAULTS.put("different-world", "&c{player} is in another world.");
-        DEFAULTS.put("too-new", "&cYou need to have played for {hours}h before you can trade.");
-        DEFAULTS.put("they-are-too-new", "&c{player} has not played long enough to trade yet.");
-        DEFAULTS.put("request-sent", "&aTrade request sent to &f{player}&a.");
-        DEFAULTS.put("request-received",
-                "&f{player} &awants to trade. &7Type &f/trade {player} &7to accept.");
-        DEFAULTS.put("request-cooldown", "&cWait a moment before sending another request.");
-        DEFAULTS.put("toggle-on",
-                "&eIncoming trade requests are now &cblocked&e. &7/trade toggle &eallows them again.");
-        DEFAULTS.put("toggle-off", "&aIncoming trade requests are now allowed.");
-        DEFAULTS.put("requests-blocked", "&c{player} isn't accepting trade requests.");
-        DEFAULTS.put("item-blocked", "&cThat item cannot be traded.");
-        DEFAULTS.put("item-blocked-inside", "&cSomething inside that item cannot be traded.");
-        DEFAULTS.put("opened", "&aTrading with &f{player}&a.");
-        DEFAULTS.put("cancelled", "&cTrade cancelled. Your items have been returned.");
-        DEFAULTS.put("cancelled-by-other", "&c{player} cancelled the trade.");
-        DEFAULTS.put("completed", "&aTrade complete.");
-        DEFAULTS.put("confirm-reset",
-                "&eThe offer changed, so both confirmations were cleared.");
-        DEFAULTS.put("confirm-wait", "&cThe offer just changed. Check it, then confirm in {seconds}s.");
-        DEFAULTS.put("locked", "&cThe trade is settling and cannot be changed.");
-        DEFAULTS.put("nothing-offered", "&cNeither of you has offered anything.");
-        DEFAULTS.put("full-inventory", "&cThere is not enough room in one of your inventories.");
-        DEFAULTS.put("not-enough-money", "&cOne of you cannot cover the coins offered.");
-        DEFAULTS.put("payment-recovery", "&cThis trade is on hold because a payment could not be confirmed. Contact staff; do not repeat the trade.");
-        DEFAULTS.put("economy-error", "&cThe payment failed. Nothing was traded.");
-        DEFAULTS.put("other-left", "&cThe other player left. The trade was cancelled.");
-        DEFAULTS.put("coins-prompt-title", "&fHow many coins to offer?");
-        DEFAULTS.put("coins-prompt", "&7Leave it blank to keep the current offer.");
-        DEFAULTS.put("coins-invalid", "&cThat is not a valid amount.");
-        DEFAULTS.put("coins-too-much", "&cYou do not have that much.");
-        DEFAULTS.put("coins-set", "&aYour coin offer is now &f{amount}&a.");
-        DEFAULTS.put("no-economy", "&cNo economy is installed, so coins cannot be traded.");
-        DEFAULTS.put("returned-items",
-                "&aYou were holding items in a trade when the server stopped. They are back in your "
-                        + "inventory.");
-        DEFAULTS.put("returned-partial",
-                "&eSome items from an interrupted trade did not fit. Make room and rejoin.");
-        DEFAULTS.put("trade-restricted-self",
-                "&cYour account can't trade right now. Contact staff if you think this is a mistake.");
-        DEFAULTS.put("trade-restricted-other", "&cYou can't trade with {player} right now.");
-        DEFAULTS.put("trade-restricted",
-                "&cThis trade can't go ahead right now, so it was cancelled. Your items have been returned.");
-        DEFAULTS.put("reloaded", "&aRoyalTrade reloaded.");
-        DEFAULTS.put("input.confirm", "&aDone");
-        DEFAULTS.put("input.cancel", "&cCancel");
-    }
-
-    // shipped defaults that were reworded; a file still holding the old text gets the new one
-    private static final Map<String, String> REWORDED = Map.of(
+    // wording shipped by earlier versions; a file still holding it shows today's default instead
+    private static final Map<String, String> RETIRED = Map.of(
             "coins-prompt", "&7Type an amount on the sign, or leave it blank to keep the current offer.");
 
     private final File file;
     private final Logger logger;
+    private final YamlConfiguration defaults = Bundled.yaml("messages.yml");
     private YamlConfiguration config;
 
     public MessageManager(File dataFolder, Logger logger) {
@@ -91,26 +33,22 @@ public final class MessageManager {
     }
 
     public void reload() {
-        config = YamlConfiguration.loadConfiguration(file);
-        boolean dirty = false;
-        for (Map.Entry<String, String> entry : DEFAULTS.entrySet()) {
-            if (!config.isSet(entry.getKey())
-                    || config.getString(entry.getKey(), "").equals(REWORDED.get(entry.getKey()))) {
-                config.set(entry.getKey(), entry.getValue());
-                dirty = true;
-            }
+        try {
+            Bundled.copyIfMissing("messages.yml", file);
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "Could not write messages.yml; using the built-in messages", e);
         }
-        if (dirty) {
-            try {
-                config.save(file);
-            } catch (IOException e) {
-                logger.log(Level.WARNING, "Could not write messages.yml", e);
-            }
-        }
+        YamlConfiguration loaded = YamlConfiguration.loadConfiguration(file);
+        loaded.setDefaults(defaults);
+        config = loaded;
     }
 
     public String raw(String key) {
-        return config.getString(key, DEFAULTS.getOrDefault(key, key));
+        String value = config.getString(key);
+        if (value == null) {
+            return key;
+        }
+        return value.equals(RETIRED.get(key)) ? defaults.getString(key, value) : value;
     }
 
     public void send(CommandSender to, String key) {

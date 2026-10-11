@@ -1,0 +1,127 @@
+# The trade window. Each player gets their own copy, with their own offer on the
+# left. Reload with /trade reload; trades already open keep the old layout.
+#
+# Items are written as: material name:"display name"
+# Rows and columns start at 1. A button's id decides what clicking it does, so
+# move or restyle buttons freely but keep the ids.
+
+# {player} is the other player.
+title: "&8Trading with &f{player}"
+rows: 6
+
+# Filler: a digit is that entry of mask.items (1 = the first), a letter marks an
+# offer area from regions below, 0 leaves the slot empty.
+mask:
+  items:
+    - black_stained_glass_pane
+    - gray_stained_glass_pane
+  pattern:
+    - "AAAA2BBBB"
+    - "AAAA2BBBB"
+    - "AAAA2BBBB"
+    - "AAAA2BBBB"
+    - "111121111"
+    - "111121111"
+
+# Offer areas, filled left to right, top to bottom. A player can offer as many
+# stacks as the smaller of the two areas holds.
+regions:
+  my-offer: "A"
+  their-offer: "B"
+
+slots:
+  # The viewer's coin offer; clicking it opens the coin dialog.
+  # {amount} is the offer, formatted by the economy plugin.
+  - id: my-coins
+    row: 5
+    column: 2
+    states:
+      none:
+        item: gold_nugget name:"&eYour offer"
+        lore:
+          - "&f{amount}"
+          - ""
+          - "&eClick to change"
+          - "&8Changing this clears both confirmations."
+      some:
+        item: gold_ingot name:"&eYour offer"
+        lore:
+          - "&f{amount}"
+          - ""
+          - "&eClick to change"
+          - "&8Changing this clears both confirmations."
+
+  # The other player's coin offer.
+  - id: their-coins
+    row: 5
+    column: 8
+    states:
+      none:
+        item: gold_nugget name:"&eTheir offer"
+        lore:
+          - "&f{amount}"
+          - ""
+          - "&8What they are putting in."
+      some:
+        item: gold_ingot name:"&eTheir offer"
+        lore:
+          - "&f{amount}"
+          - ""
+          - "&8What they are putting in."
+
+  # The viewer's confirm button. waiting: an offer just changed, {seconds} until
+  # confirming is allowed. settling: both confirmed, {seconds} until it completes.
+  - id: my-confirm
+    row: 6
+    column: 3
+    states:
+      unconfirmed:
+        item: gray_dye name:"&7Confirm trade"
+        lore:
+          - "&7Check the right-hand side first."
+          - ""
+          - "&eClick to confirm"
+      confirmed:
+        item: lime_dye name:"&aYou have confirmed"
+        lore:
+          - "&7Waiting for the other player."
+          - ""
+          - "&eClick to take it back"
+      waiting:
+        # quoted: a colon followed by a space would otherwise end the value
+        item: 'orange_dye name:"&6Offer changed: confirm in {seconds}s"'
+        lore:
+          - "&7Check both sides before you confirm."
+      settling:
+        item: clock name:"&6Completing in {seconds}s…"
+        lore:
+          - "&7Both sides have confirmed."
+          - "&7The trade is locked while it settles."
+
+  # Whether the other player has confirmed.
+  - id: their-confirm
+    row: 6
+    column: 7
+    states:
+      unconfirmed:
+        item: gray_dye name:"&7They have not confirmed"
+        lore:
+          - "&7Give them a moment."
+      confirmed:
+        item: lime_dye name:"&aThey have confirmed"
+        lore:
+          - "&7Waiting on you."
+      settling:
+        item: clock name:"&6Completing in {seconds}s…"
+        lore:
+          - "&7Both sides have confirmed."
+          - "&7The trade is locked while it settles."
+
+  # Cancels the trade and returns both offers.
+  - id: cancel
+    row: 6
+    column: 1
+    item: barrier name:"&cCancel trade"
+    lore:
+      - "&7Nothing changes hands."
+      - "&7Your items come straight back."
