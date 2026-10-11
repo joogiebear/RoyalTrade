@@ -1,0 +1,65 @@
+# RoyalTrade messages. Colour codes use &. Reload with /trade reload.
+# Leave a chat message empty ("") to stop it being sent.
+# A key missing here uses the default shipped in the jar.
+
+# Put in front of every chat message.
+prefix: "&6Trade &8» &r"
+
+player-only: "&cOnly players can trade."
+usage: "&7Usage: &f/trade <player>"
+no-such-player: "&cThat player is not online."
+cannot-trade-self: "&cYou cannot trade with yourself."
+already-trading: "&cYou are already in a trade."
+# {player} is the other player in every message that has it.
+they-are-trading: "&c{player} is already in a trade."
+too-far: "&c{player} is too far away."
+different-world: "&c{player} is in another world."
+# {hours} is min-playtime-hours from config.yml.
+too-new: "&cYou need to have played for {hours}h before you can trade."
+they-are-too-new: "&c{player} has not played long enough to trade yet."
+request-sent: "&aTrade request sent to &f{player}&a."
+request-received: "&f{player} &awants to trade. &7Type &f/trade {player} &7to accept."
+request-cooldown: "&cWait a moment before sending another request."
+toggle-on: "&eIncoming trade requests are now &cblocked&e. &7/trade toggle &eallows them again."
+toggle-off: "&aIncoming trade requests are now allowed."
+requests-blocked: "&c{player} isn't accepting trade requests."
+item-blocked: "&cThat item cannot be traded."
+item-blocked-inside: "&cSomething inside that item cannot be traded."
+opened: "&aTrading with &f{player}&a."
+cancelled: "&cTrade cancelled. Your items have been returned."
+cancelled-by-other: "&c{player} cancelled the trade."
+completed: "&aTrade complete."
+confirm-reset: "&eThe offer changed, so both confirmations were cleared."
+# {seconds} until confirming is allowed again.
+confirm-wait: "&cThe offer just changed. Check it, then confirm in {seconds}s."
+locked: "&cThe trade is settling and cannot be changed."
+nothing-offered: "&cNeither of you has offered anything."
+full-inventory: "&cThere is not enough room in one of your inventories."
+not-enough-money: "&cOne of you cannot cover the coins offered."
+payment-recovery: "&cThis trade is on hold because a payment could not be confirmed. Contact staff; do not repeat the trade."
+economy-error: "&cThe payment failed. Nothing was traded."
+other-left: "&cThe other player left. The trade was cancelled."
+
+# The coin offer dialog: its title and the line under it.
+coins-prompt-title: "&fHow many coins to offer?"
+coins-prompt: "&7Leave it blank to keep the current offer."
+coins-invalid: "&cThat is not a valid amount."
+coins-too-much: "&cYou do not have that much."
+# {amount} is the new offer, formatted by the economy plugin.
+coins-set: "&aYour coin offer is now &f{amount}&a."
+no-economy: "&cNo economy is installed, so coins cannot be traded."
+
+returned-items: "&aYou were holding items in a trade when the server stopped. They are back in your inventory."
+returned-partial: "&eSome items from an interrupted trade did not fit. Make room and rejoin."
+
+# Sent when EconGuard refuses a trade.
+trade-restricted-self: "&cYour account can't trade right now. Contact staff if you think this is a mistake."
+trade-restricted-other: "&cYou can't trade with {player} right now."
+trade-restricted: "&cThis trade can't go ahead right now, so it was cancelled. Your items have been returned."
+
+reloaded: "&aRoyalTrade reloaded."
+
+# Buttons on the coin offer dialog.
+input:
+  confirm: "&aDone"
+  cancel: "&cCancel"

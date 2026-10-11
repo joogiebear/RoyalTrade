@@ -5,6 +5,7 @@ import com.mystipixel.royaltrade.data.Escrow;
 import com.mystipixel.royaltrade.data.TradeLog;
 import com.mystipixel.royaltrade.gui.TextInput;
 import com.mystipixel.royaltrade.gui.TradeGui;
+import com.mystipixel.royaltrade.gui.TradeMenu;
 import com.mystipixel.royaltrade.hooks.EconGuardHook;
 import com.mystipixel.royaltrade.hooks.EconomyHook;
 import com.mystipixel.royaltrade.message.MessageManager;
@@ -82,7 +83,8 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
         econGuard = new EconGuardHook();
         trades = new TradeManager(economy, escrow, log, econGuard, payments, getLogger());
-        gui = new TradeGui(economy, this::settleMillis, this::confirmDelayMillis);
+        gui = new TradeGui(economy, this::settleMillis, this::confirmDelayMillis,
+                TradeMenu.load(getDataFolder(), getLogger()));
         textInput = new TextInput(this, messages);
 
         TradeCommand command = new TradeCommand(this);
@@ -143,6 +145,7 @@ public final class RoyalTradePlugin extends JavaPlugin {
         reloadConfig();
         readConfig();
         messages.reload();
+        gui.setMenu(TradeMenu.load(getDataFolder(), getLogger()));
     }
 
     // completes trades whose settle window has elapsed; TradeSession refuses edits while settling

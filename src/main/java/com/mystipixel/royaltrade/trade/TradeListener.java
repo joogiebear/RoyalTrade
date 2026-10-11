@@ -1,7 +1,7 @@
 package com.mystipixel.royaltrade.trade;
 
 import com.mystipixel.royaltrade.RoyalTradePlugin;
-import com.mystipixel.royaltrade.gui.TradeGui;
+import com.mystipixel.royaltrade.gui.TradeMenu;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -64,7 +64,7 @@ public final class TradeListener implements Listener {
             return;
         }
         if (!session.editable()) {
-            if (event.getSlot() != TradeGui.CLOSE || !top) {
+            if (!top || !TradeMenu.CANCEL.equals(plugin.gui().buttonAt(player, event.getSlot()))) {
                 plugin.messages().send(player, "locked");
                 return;
             }
@@ -88,7 +88,7 @@ public final class TradeListener implements Listener {
                 }
                 case NONE -> { }
             }
-            if (side.offered().size() >= TradeGui.MINE.length) {
+            if (side.offered().size() >= plugin.gui().offerCapacity(player)) {
                 return;
             }
             boolean hadConfirmation = anyConfirmed(session);
@@ -102,12 +102,13 @@ public final class TradeListener implements Listener {
     private void handleTopClick(InventoryClickEvent event, Player player,
                                 TradeSession session, TradeSession.Side side) {
         int slot = event.getSlot();
+        String button = plugin.gui().buttonAt(player, slot);
 
-        if (slot == TradeGui.CLOSE) {
+        if (TradeMenu.CANCEL.equals(button)) {
             cancel(session, player, true);
             return;
         }
-        if (slot == TradeGui.MY_CONFIRM) {
+        if (TradeMenu.MY_CONFIRM.equals(button)) {
             if (side.confirmed()) {
                 session.unconfirm(side);
                 plugin.gui().render(session);
@@ -129,11 +130,11 @@ public final class TradeListener implements Listener {
             plugin.gui().render(session);
             return;
         }
-        if (slot == TradeGui.MY_COINS) {
+        if (TradeMenu.MY_COINS.equals(button)) {
             promptCoins(player, session);
             return;
         }
-        int index = TradeGui.mineIndex(slot);
+        int index = plugin.gui().offerIndex(player, slot);
         if (index >= 0) {
             boolean hadConfirmation = anyConfirmed(session);
             ItemStack removed = session.removeItem(side, index);
