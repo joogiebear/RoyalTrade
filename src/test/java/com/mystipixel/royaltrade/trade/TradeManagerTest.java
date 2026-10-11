@@ -31,7 +31,7 @@ class TradeManagerTest {
     @BeforeEach void setup() {
         economy = mock(EconomyHook.class); escrow = mock(Escrow.class);
         log = mock(TradeLog.class); guard = mock(EconGuardHook.class);
-        journal = new PaymentJournal(folder.resolve("payments"));
+        journal = new PaymentJournal(folder.resolve("payments"), java.util.logging.Logger.getLogger("test"));
         manager = new TradeManager(economy, escrow, log, guard, journal, java.util.logging.Logger.getLogger("test"));
         a = player("a"); b = player("b");
         bukkit = mockStatic(Bukkit.class);
@@ -56,7 +56,7 @@ class TradeManagerTest {
         } catch (ReflectiveOperationException e) { throw new AssertionError(e); }
         session.beginSettling(1);
     }
-    @AfterEach void close() { bukkit.close(); }
+    @AfterEach void close() { bukkit.close(); journal.close(); }
     private Player player(String name) {
         Player p = mock(Player.class); UUID id = UUID.randomUUID();
         when(p.getUniqueId()).thenReturn(id); when(p.getName()).thenReturn(name);
@@ -112,8 +112,11 @@ class TradeManagerTest {
         var record = journal.pending().values().iterator().next();
         assertEquals("SUCCESS", record.getProperty("leg.credit-a.status"));
         assertEquals("REJECTED", record.getProperty("leg.credit-b.status"));
+        journal.close();
+        PaymentJournal reopened = new PaymentJournal(folder.resolve("payments"), java.util.logging.Logger.getLogger("test"));
         TradeManager restarted = new TradeManager(economy, escrow, log, guard,
-                new PaymentJournal(folder.resolve("payments")), java.util.logging.Logger.getLogger("test"));
+                reopened, java.util.logging.Logger.getLogger("test"));
+        reopened.close();
         assertTrue(restarted.needsRecovery(a)); assertTrue(restarted.inTrade(b));
         assertThrows(IllegalStateException.class, () -> restarted.open(a, b));
         verify(escrow, never()).release(any());

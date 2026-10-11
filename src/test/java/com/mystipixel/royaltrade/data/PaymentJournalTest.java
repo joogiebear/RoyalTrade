@@ -9,10 +9,17 @@ import static org.junit.jupiter.api.Assertions.*;
 class PaymentJournalTest {
     @TempDir Path folder;
     UUID id = UUID.randomUUID(), owner = UUID.randomUUID(), other = UUID.randomUUID();
-    PaymentJournal journal() { return new PaymentJournal(folder); }
+    final List<PaymentJournal> opened = new ArrayList<>();
+    PaymentJournal journal() {
+        PaymentJournal j = new PaymentJournal(folder, java.util.logging.Logger.getLogger("test"));
+        opened.add(j);
+        return j;
+    }
+    @org.junit.jupiter.api.AfterEach void closeAll() { opened.forEach(PaymentJournal::close); }
     @Test void rejectionSurvivesRestartAndCanBeRetried() {
         var j = journal(); j.begin(id, owner, other, "test");
         assertFalse(j.attempt(id, "credit", owner, 5, true, () -> false));
+        j.close();
         var restarted = journal();
         assertEquals("REJECTED", restarted.read(id).getProperty("leg.credit.status"));
         assertTrue(restarted.attempt(id, "credit", owner, 5, true, () -> true));
@@ -30,6 +37,7 @@ class PaymentJournalTest {
         var j = journal(); j.begin(id, owner, other, "test");
         assertThrows(IllegalStateException.class, () -> j.attempt(id, "credit", owner, 5, true,
                 () -> { throw new IllegalStateException("provider may have paid"); }));
+        j.close();
         var restarted = journal();
         assertEquals("IN_FLIGHT", restarted.read(id).getProperty("leg.credit.status"));
         assertThrows(IllegalStateException.class, () -> restarted.attempt(id, "credit", owner, 5, true,
@@ -45,13 +53,16 @@ class PaymentJournalTest {
     }
     @Test void resultWriteFailureLeavesPersistedUnknownGuard() throws Exception {
         var j = journal(); j.begin(id, owner, other, "test");
-        assertThrows(RuntimeException.class, () -> j.attempt(id, "credit", owner, 5, true, () -> {
+        // the result write is not waited for; its failure stops the receipt from closing instead
+        assertTrue(j.attempt(id, "credit", owner, 5, true, () -> {
             try {
                 Files.move(folder.resolve("pending"), folder.resolve("saved"));
                 Files.createFile(folder.resolve("pending"));
             } catch (Exception e) { throw new RuntimeException(e); }
             return true;
         }));
+        assertThrows(RuntimeException.class, () -> j.complete(id));
+        j.close();
         Files.delete(folder.resolve("pending"));
         Files.move(folder.resolve("saved"), folder.resolve("pending"));
         assertEquals("IN_FLIGHT", journal().read(id).getProperty("leg.credit.status"));
