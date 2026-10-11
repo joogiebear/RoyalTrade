@@ -212,15 +212,21 @@ public final class TradeListener implements Listener {
         if (plugin.escrow().pendingFor(player.getUniqueId()).isEmpty()) {
             return;
         }
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            int delivered = plugin.escrow().deliver(player);
-            if (delivered > 0) {
-                plugin.messages().send(player, "returned-items");
-            }
-            if (!plugin.escrow().pendingFor(player.getUniqueId()).isEmpty()) {
-                plugin.messages().send(player, "returned-partial");
-            }
-        }, 20L);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> deliverPending(player), 20L);
+    }
+
+    private void deliverPending(Player player) {
+        // a quit inside the delay leaves this object dead; a rejoin schedules its own delivery
+        if (Bukkit.getPlayer(player.getUniqueId()) != player) {
+            return;
+        }
+        int delivered = plugin.escrow().deliver(player);
+        if (delivered > 0) {
+            plugin.messages().send(player, "returned-items");
+        }
+        if (!plugin.escrow().pendingFor(player.getUniqueId()).isEmpty()) {
+            plugin.messages().send(player, "returned-partial");
+        }
     }
 
     // a dialog, not chat, keeps the amount private until it is offered; opening it closes the trade
