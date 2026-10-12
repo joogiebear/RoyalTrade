@@ -1,3 +1,8 @@
+## 2026.41.4 - 2026-10-11
+
+### Features
+- save both RoyalSkyblock profiles after a completed trade (`287c0ff`)
+
 ## 2026.41.3 - 2026-10-11
 
 ### Fixes
