@@ -13,7 +13,11 @@ class TradeTogglesTest {
 
     @Test void togglesSurviveARestartAndLeaveNoTempFiles() throws Exception {
         UUID player = UUID.randomUUID();
-        assertTrue(new TradeToggles(folder.toFile(), Logger.getLogger("test")).toggle(player));
+        TradeToggles toggles = new TradeToggles(folder.toFile(), Logger.getLogger("test"));
+        assertTrue(toggles.toggle(player));
+        assertFalse(toggles.toggle(player));
+        assertTrue(toggles.toggle(player));
+        toggles.close();
         assertTrue(new TradeToggles(folder.toFile(), Logger.getLogger("test")).isBlocking(player));
         try (var files = Files.list(folder)) {
             assertEquals(1, files.count());

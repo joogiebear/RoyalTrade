@@ -1,5 +1,6 @@
 package com.mystipixel.royaltrade.data;
 
+import com.mystipixel.royaltrade.util.BackgroundWriter;
 import com.mystipixel.royaltrade.util.ItemContents;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.enchantments.Enchantment;
@@ -9,7 +10,6 @@ import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
@@ -20,7 +20,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.UUID;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -29,12 +28,22 @@ import java.util.logging.Logger;
  */
 public final class TradeLog {
 
-    private final File file;
-    private final Logger logger;
+    private static final long CLOSE_TIMEOUT_MILLIS = 5_000L;
+
+    private final BackgroundWriter<String> writer;
 
     public TradeLog(File dataFolder, Logger logger) {
-        this.file = new File(dataFolder, "trades.log");
-        this.logger = logger;
+        File file = new File(dataFolder, "trades.log");
+        // lines queued while a write runs are appended together
+        this.writer = new BackgroundWriter<>("trades.log", "RoyalTrade-log-writer",
+                lines -> Files.writeString(file.toPath(), lines, StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND),
+                (queued, newer) -> queued + newer, logger);
+    }
+
+    /** Waits for queued lines to reach disk. Call from onDisable. */
+    public void close() {
+        writer.close(CLOSE_TIMEOUT_MILLIS);
     }
 
     public void record(UUID sessionId, Player a, Player b,
@@ -44,13 +53,7 @@ public final class TradeLog {
                 Instant.now(), sessionId == null ? "?" : sessionId,
                 a.getName(), a.getUniqueId(), describe(aGave), aCoins,
                 b.getName(), b.getUniqueId(), describe(bGave), bCoins);
-        try {
-            Files.writeString(file.toPath(), line, StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException e) {
-            logger.log(Level.WARNING, "Could not append to trades.log; this trade has no audit "
-                    + "record, though it did complete.", e);
-        }
+        writer.submit(line);
     }
 
     /**
