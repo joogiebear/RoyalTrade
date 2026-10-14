@@ -38,6 +38,8 @@ class SettlementJournalTest {
     final List<WatchedJournal.Op> ops = Collections.synchronizedList(new ArrayList<>());
     // the pending and receipts folders after each disk operation, starting with the empty state
     final List<Map<String, String>> states = Collections.synchronizedList(new ArrayList<>());
+    // what the provider actually answered for each leg it was called for
+    final Map<String, String> results = new HashMap<>();
 
     @BeforeEach void setup() {
         economy = mock(EconomyHook.class); escrow = mock(Escrow.class); guard = mock(EconGuardHook.class);
@@ -117,6 +119,7 @@ class SettlementJournalTest {
 
     private boolean leg(String step, boolean result) throws IOException {
         assertEquals("IN_FLIGHT", onDisk().getProperty("leg." + step + ".status"), step + " ran before its intent was on disk");
+        results.put(step, result ? "SUCCESS" : "REJECTED");
         return result;
     }
 
@@ -128,8 +131,8 @@ class SettlementJournalTest {
         return manager.commit(session);
     }
 
-    // A crash can stop the disk at any of the captured states. Each one must be a state the synchronous
-    // journal also passed through, and a restart from it must hold or free the players as it did then.
+    // A crash can stop the disk at any of the captured states. Each one must claim no more than really
+    // happened, and a restart from it must hold the players while a receipt is open and free them after.
     private void assertEveryCrashPointRecoversAsBefore(List<String> legOrder) throws IOException {
         journal.flush();
         int i = 0;
@@ -137,7 +140,7 @@ class SettlementJournalTest {
             String open = state.entrySet().stream().filter(e -> e.getKey().startsWith("pending/"))
                     .map(Map.Entry::getValue).findFirst().orElse(null);
             assertTrue(state.keySet().stream().filter(k -> k.startsWith("pending/")).count() <= 1);
-            if (open != null) assertSynchronousJournalState(open, legOrder);
+            if (open != null) assertClaimsNoMoreThanHappened(open, legOrder);
 
             Path restart = folder.resolve("restart-" + i++);
             for (var file : state.entrySet()) {
@@ -160,27 +163,21 @@ class SettlementJournalTest {
         }
     }
 
-    // the synchronous journal wrote after every single step: some legs settled in order, at most the last
-    // one IN_FLIGHT, and the delivery mark only once every leg had settled
-    private static void assertSynchronousJournalState(String text, List<String> legOrder) throws IOException {
+    // every leg on disk is IN_FLIGHT or the provider's real answer (a zero leg succeeds without a call),
+    // and only known legs appear
+    private void assertClaimsNoMoreThanHappened(String text, List<String> legOrder) throws IOException {
         Properties p = new Properties();
         p.load(new StringReader(text));
-        int present = 0;
-        boolean inFlight = false;
-        for (String step : legOrder) {
-            String status = p.getProperty("leg." + step + ".status");
-            if (status == null) break;
-            assertFalse(inFlight, "a leg was written after an unsettled one: " + p);
-            inFlight = "IN_FLIGHT".equals(status);
-            present++;
+        for (String key : p.stringPropertyNames()) {
+            if (!key.startsWith("leg.") || !key.endsWith(".status")) continue;
+            String step = key.substring("leg.".length(), key.length() - ".status".length());
+            assertTrue(legOrder.contains(step), "unexpected leg " + step + ": " + p);
+            String status = p.getProperty(key);
+            if ("IN_FLIGHT".equals(status) || "0.0".equals(p.getProperty("leg." + step + ".amount"))) continue;
+            assertEquals(results.get(step), status, "result never returned: " + p);
         }
-        for (String step : legOrder.subList(present, legOrder.size())) {
-            assertNull(p.getProperty("leg." + step + ".status"), "legs out of order: " + p);
-        }
-        if (p.getProperty("delivery") != null) {
-            assertEquals(legOrder.size(), present, "delivery marked before every leg: " + p);
-            assertFalse(inFlight, "delivery marked with a leg unsettled: " + p);
-        }
+        String delivery = p.getProperty("delivery");
+        if (delivery != null) assertEquals("IN_FLIGHT", delivery);
     }
 
     @Test void theMainThreadDoesNoJournalFileWork() {
@@ -202,6 +199,13 @@ class SettlementJournalTest {
         assertEveryCrashPointRecoversAsBefore(List.of("debit-a", "debit-b", "credit-a", "credit-b"));
     }
 
+    @Test void aPaidTradeWritesItsReceiptTwice() {
+        pays(true, true, true, true, true);
+        assertEquals(TradeManager.Failure.NONE, settle(10, 20));
+        journal.flush();
+        assertEquals(List.of("write", "write", "move"), ops.stream().map(WatchedJournal.Op::kind).toList());
+    }
+
     @Test void anItemOnlyTradeRecoversAsBeforeFromACrashAtAnyStep() throws IOException {
         pays(true, true, true, true, true);
         assertEquals(TradeManager.Failure.NONE, settle(0, 0));
@@ -214,7 +218,7 @@ class SettlementJournalTest {
         assertEquals(TradeManager.Failure.ECONOMY_ERROR, settle(10, 20));
         verify(economy).deposit(a, 10);
         assertTrue(journal.pending().isEmpty());
-        assertEveryCrashPointRecoversAsBefore(List.of("debit-a", "debit-b", "refund-a"));
+        assertEveryCrashPointRecoversAsBefore(List.of("debit-a", "debit-b", "credit-a", "credit-b", "refund-a"));
     }
 
     @Test void aHeldTradeRecoversAsBeforeFromACrashAtAnyStep() throws IOException {

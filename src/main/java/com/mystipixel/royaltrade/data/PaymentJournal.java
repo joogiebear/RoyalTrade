@@ -42,6 +42,9 @@ public final class PaymentJournal {
         }
     };
 
+    /** A payment leg named up front, see {@link #begin(UUID, UUID, UUID, String, List, boolean)}. */
+    public record Leg(String step, UUID account, double amount, boolean credit) {}
+
     // queued work for one record; a newer change to the same record is merged into a queued one
     private record Change(String content, boolean close, boolean discard) {
         Change then(Change next) {
@@ -62,6 +65,8 @@ public final class PaymentJournal {
     private final Set<UUID> unsaved = new HashSet<>();
     // records whose latest write failed, until a newer write of the same record lands
     private final Map<UUID, IOException> failed = new ConcurrentHashMap<>();
+    // property prefixes already IN_FLIGHT on disk from the intent write whose step has not run yet
+    private final Map<UUID, Set<String>> planned = new HashMap<>();
 
     public PaymentJournal(Path folder, Logger logger) {
         this(folder, logger, FILES, FLUSH_TIMEOUT_MILLIS);
@@ -87,6 +92,21 @@ public final class PaymentJournal {
     }
 
     public synchronized void begin(UUID id, UUID owner, UUID other, String reason, Map<String, String> context) {
+        begin(id, owner, other, reason, context, List.of(), false);
+    }
+
+    /**
+     * Writes the intent with every non-zero leg, and the delivery if {@code delivery}, already marked
+     * IN_FLIGHT, so their {@link #attempt} and {@link #delivering} calls wait on no write of their own.
+     * A crash then leaves every planned leg IN_FLIGHT, which is held like any unknown outcome. A planned
+     * step that never ran is dropped from the record by its next write.
+     */
+    public synchronized void begin(UUID id, UUID owner, UUID other, String reason, List<Leg> legs, boolean delivery) {
+        begin(id, owner, other, reason, Map.of(), legs, delivery);
+    }
+
+    private void begin(UUID id, UUID owner, UUID other, String reason, Map<String, String> context,
+                       List<Leg> legs, boolean delivery) {
         Properties existing = read(id);
         if (existing != null) {
             if (!owner.toString().equals(existing.getProperty("owner"))
@@ -107,14 +127,25 @@ public final class PaymentJournal {
         p.setProperty("other", Objects.toString(other, ""));
         p.setProperty("reason", reason);
         context.forEach((key, value) -> p.setProperty("context." + key, value));
+        Set<String> steps = new HashSet<>();
+        for (Leg leg : legs) {
+            checkLeg(leg.step(), leg.amount());
+            if (leg.amount() == 0) continue;
+            String base = "leg." + leg.step() + ".";
+            markInFlight(p, base, leg.account(), leg.amount(), leg.credit());
+            steps.add(base);
+        }
+        if (delivery) {
+            p.setProperty("delivery", "IN_FLIGHT");
+            steps.add("delivery");
+        }
+        if (!steps.isEmpty()) planned.put(id, steps);
         await(id, store(id, p));
     }
 
     public synchronized boolean attempt(UUID id, String step, UUID account, double amount,
                                         boolean credit, BooleanSupplier call) {
-        if (!step.matches("[a-zA-Z0-9_-]+") || !Double.isFinite(amount) || amount < 0) {
-            throw new IllegalArgumentException("Invalid payment leg");
-        }
+        checkLeg(step, amount);
         Properties p = Objects.requireNonNull(record(id), "Missing payment intent");
         String base = "leg." + step + ".";
         String identity = account + ":" + Double.toString(amount) + ":" + credit;
@@ -126,17 +157,20 @@ public final class PaymentJournal {
         if (status != null && !Set.of("SUCCESS", "REJECTED", "IN_FLIGHT").contains(status)) {
             throw new IllegalStateException("Invalid payment status: " + id);
         }
-        if ("IN_FLIGHT".equals(status)) throw new IllegalStateException("Unknown payment outcome: " + id + "/" + step);
+        // planned by begin: its IN_FLIGHT mark is already on disk. Unplanned before the call, so a throw
+        // from the provider leaves it IN_FLIGHT for good
+        boolean guarded = "IN_FLIGHT".equals(status) && unplan(id, base);
+        if ("IN_FLIGHT".equals(status) && !guarded) {
+            throw new IllegalStateException("Unknown payment outcome: " + id + "/" + step);
+        }
         if (Files.exists(receipts.resolve(id + ".properties"))) {
             throw new IllegalStateException("Settlement is already closed: " + id);
         }
-        p.setProperty(base + "identity", identity);
-        p.setProperty(base + "account", account.toString());
-        p.setProperty(base + "amount", Double.toString(amount));
-        p.setProperty(base + "credit", Boolean.toString(credit));
-        p.setProperty(base + "status", "IN_FLIGHT");
-        // a zero leg moves nothing, so it has nothing to guard
-        if (amount > 0) await(id, store(id, p)); // A failed or late write prevents the provider call.
+        if (!guarded) {
+            markInFlight(p, base, account, amount, credit);
+            // a zero leg moves nothing, so it has nothing to guard
+            if (amount > 0) await(id, store(id, p)); // A failed or late write prevents the provider call.
+        }
         boolean success = amount == 0 || call.getAsBoolean(); // Exceptions deliberately leave IN_FLIGHT.
         p.setProperty(base + "status", success ? "SUCCESS" : "REJECTED");
         // goes out with the next guarded write, complete() or writeLater(); a crash first leaves IN_FLIGHT
@@ -148,6 +182,7 @@ public final class PaymentJournal {
     /** Mark the delivery boundary before touching player inventories. Never automatically replay it. */
     public synchronized void delivering(UUID id) {
         Properties p = Objects.requireNonNull(record(id));
+        if (unplan(id, "delivery")) return;
         p.setProperty("delivery", "IN_FLIGHT");
         await(id, store(id, p));
     }
@@ -158,6 +193,7 @@ public final class PaymentJournal {
             if (Files.exists(receipts.resolve(id + ".properties"))) return;
             p = Objects.requireNonNull(load(id));
         }
+        if (dropUnrun(id, p)) unsaved.add(id);
         for (String key : p.stringPropertyNames()) {
             if (key.startsWith("leg.") && key.endsWith(".status") && "IN_FLIGHT".equals(p.getProperty(key))) {
                 throw new IllegalStateException("Cannot close an unknown payment: " + id);
@@ -172,6 +208,7 @@ public final class PaymentJournal {
     public synchronized void discard(UUID id) {
         Properties p = open.get(id);
         if (p == null) return;
+        dropUnrun(id, p);
         for (String key : p.stringPropertyNames()) {
             if (key.startsWith("leg.")) throw new IllegalStateException("Cannot discard an attempted payment: " + id);
         }
@@ -182,6 +219,8 @@ public final class PaymentJournal {
 
     /** Queues the record's latest state without waiting, e.g. once a settlement is held. */
     public synchronized void writeLater(UUID id) {
+        Properties p = open.get(id);
+        if (p != null && dropUnrun(id, p)) unsaved.add(id);
         if (unsaved.remove(id)) writer.submit(Map.of(id, new Change(serialise(open.get(id)), false, false)));
     }
 
@@ -225,6 +264,38 @@ public final class PaymentJournal {
         p = load(id);
         if (p != null && Files.exists(pending.resolve(id + ".properties"))) open.put(id, p);
         return p;
+    }
+
+    private static void checkLeg(String step, double amount) {
+        if (!step.matches("[a-zA-Z0-9_-]+") || !Double.isFinite(amount) || amount < 0) {
+            throw new IllegalArgumentException("Invalid payment leg");
+        }
+    }
+
+    private static void markInFlight(Properties p, String base, UUID account, double amount, boolean credit) {
+        p.setProperty(base + "identity", account + ":" + Double.toString(amount) + ":" + credit);
+        p.setProperty(base + "account", account.toString());
+        p.setProperty(base + "amount", Double.toString(amount));
+        p.setProperty(base + "credit", Boolean.toString(credit));
+        p.setProperty(base + "status", "IN_FLIGHT");
+    }
+
+    // true if the step was planned and had not run yet; it counts as running from here on
+    private boolean unplan(UUID id, String prefix) {
+        Set<String> steps = planned.get(id);
+        if (steps == null || !steps.remove(prefix)) return false;
+        if (steps.isEmpty()) planned.remove(id);
+        return true;
+    }
+
+    // a planned step that never ran moved nothing, so the record need not hold it IN_FLIGHT
+    private boolean dropUnrun(UUID id, Properties p) {
+        Set<String> steps = planned.remove(id);
+        if (steps == null) return false;
+        for (String key : p.stringPropertyNames()) {
+            if (steps.stream().anyMatch(key::startsWith)) p.remove(key);
+        }
+        return true;
     }
 
     private long store(UUID id, Properties p) {

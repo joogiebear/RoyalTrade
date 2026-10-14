@@ -168,6 +168,11 @@ public final class Escrow {
         writer.whenDurable(seq, () -> mainThread.execute(task));
     }
 
+    /** True when every change so far is on disk. */
+    public boolean isDurable() {
+        return writer.durable() >= writer.requested();
+    }
+
     /** The newest write that is on disk. */
     public long durableSeq() {
         return writer.durable();

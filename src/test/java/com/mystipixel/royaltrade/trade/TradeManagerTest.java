@@ -222,6 +222,25 @@ class TradeManagerTest {
         order.verify(a).saveData();
         order.verify(economy).withdraw(a, 10);
     }
+    @Test void settlementWritesNoEscrowWhenItIsAlreadyOnDisk() {
+        when(escrow.isDurable()).thenReturn(true);
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        verify(escrow, never()).hold(any(), anyMap());
+        InOrder order = inOrder(economy, a);
+        order.verify(economy).withdraw(a, 10);
+        order.verify(a).saveData();                          // only the save after delivery
+        verify(a, times(1)).saveData();
+    }
+    @Test void aSaveStillOwedIsMadeBeforeTheFirstDebit() {
+        when(escrow.hold(any(), anyMap())).thenReturn(1L);
+        manager.persist(session);                            // its after-write save has not run yet
+        when(escrow.isDurable()).thenReturn(true);
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        InOrder order = inOrder(a, economy);
+        order.verify(a).saveData();
+        order.verify(economy).withdraw(a, 10);
+        verify(a, times(2)).saveData();
+    }
     @Test void anEscrowThatCannotReachDiskMovesNothing() {
         doThrow(new java.io.UncheckedIOException(new java.io.IOException("disk full"))).when(escrow).flush();
         assertEquals(TradeManager.Failure.ECONOMY_ERROR, manager.commit(session));

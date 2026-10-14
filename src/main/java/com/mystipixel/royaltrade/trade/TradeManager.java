@@ -112,11 +112,24 @@ public final class TradeManager {
         escrow.whenDurable(seq, this::saveDue);
     }
 
-    // settlement: nothing may leave a player until escrow is on disk
+    // settlement: nothing may leave a player until escrow is on disk and their saved data agrees with it.
+    // persist() has normally done both already, so this only writes what is still missing
     private void persistNow(UUID id, TradeSession session) {
-        holdEscrow(id, session);
+        if (!escrow.isDurable()) {
+            long seq = holdEscrow(id, session);
+            savesDue.merge(session.a().playerId(), seq, Math::max);
+            savesDue.merge(session.b().playerId(), seq, Math::max);
+        }
         escrow.flush();
-        saveInventories(session);
+        saveIfDue(session.a().playerId());
+        saveIfDue(session.b().playerId());
+    }
+
+    // only called once escrow is fully on disk, so any save still owed is safe now
+    private void saveIfDue(UUID player) {
+        if (savesDue.remove(player) != null) {
+            saveInventory(Bukkit.getPlayer(player));
+        }
     }
 
     private long holdEscrow(UUID id, TradeSession session) {
@@ -285,8 +298,14 @@ public final class TradeManager {
             logger.log(java.util.logging.Level.SEVERE, "Cannot persist trade intent; no payment attempted", e);
             return Failure.ECONOMY_ERROR;
         }
+        // one intent write guards every leg and the delivery; the results go out with the close
+        List<PaymentJournal.Leg> legs = List.of(
+                new PaymentJournal.Leg("debit-a", pa.getUniqueId(), coinsA, false),
+                new PaymentJournal.Leg("debit-b", pb.getUniqueId(), coinsB, false),
+                new PaymentJournal.Leg("credit-a", pa.getUniqueId(), coinsB, true),
+                new PaymentJournal.Leg("credit-b", pb.getUniqueId(), coinsA, true));
         try {
-            payments.begin(attempt, pa.getUniqueId(), pb.getUniqueId(), "trade:" + id);
+            payments.begin(attempt, pa.getUniqueId(), pb.getUniqueId(), "trade:" + id, legs, true);
         } catch (RuntimeException e) {
             // a timed-out write may still land; nothing was paid, so it must not hold the players later
             payments.discard(attempt);
