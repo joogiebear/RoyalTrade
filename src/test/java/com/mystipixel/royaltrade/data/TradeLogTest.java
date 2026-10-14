@@ -26,13 +26,27 @@ class TradeLogTest {
         Locale previous = Locale.getDefault();
         Locale.setDefault(Locale.GERMANY);
         try {
-            new TradeLog(folder.toFile(), Logger.getLogger("test"))
-                    .record(UUID.randomUUID(), player("a"), player("b"), List.of(), List.of(), 1234.5, 0);
+            TradeLog log = new TradeLog(folder.toFile(), Logger.getLogger("test"));
+            log.record(UUID.randomUUID(), player("a"), player("b"), List.of(), List.of(), 1234.5, 0);
+            log.close();
         } finally {
             Locale.setDefault(previous);
         }
         String line = Files.readString(folder.resolve("trades.log"));
         assertTrue(line.contains("gave [nothing] + 1234.50"), line);
         assertFalse(line.contains("1234,50"), line);
+    }
+
+    @Test void linesQueuedTogetherAreAllAppendedInOrder() throws Exception {
+        TradeLog log = new TradeLog(folder.toFile(), Logger.getLogger("test"));
+        for (int i = 0; i < 50; i++) {
+            log.record(UUID.randomUUID(), player("a" + i), player("b"), List.of(), List.of(), i, 0);
+        }
+        log.close();
+        List<String> lines = Files.readAllLines(folder.resolve("trades.log"));
+        assertEquals(50, lines.size());
+        for (int i = 0; i < 50; i++) {
+            assertTrue(lines.get(i).contains(" a" + i + "("), lines.get(i));
+        }
     }
 }

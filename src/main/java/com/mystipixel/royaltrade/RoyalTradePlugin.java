@@ -144,6 +144,12 @@ public final class RoyalTradePlugin extends JavaPlugin {
         if (payments != null) {
             payments.close();
         }
+        if (log != null) {
+            log.close();
+        }
+        if (toggles != null) {
+            toggles.close();
+        }
     }
 
     private void readConfig() {
