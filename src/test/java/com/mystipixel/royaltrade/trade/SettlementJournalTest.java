@@ -131,16 +131,16 @@ class SettlementJournalTest {
         return manager.commit(session);
     }
 
-    // A crash can stop the disk at any of the captured states. Each one must claim no more than really
-    // happened, and a restart from it must hold the players while a receipt is open and free them after.
-    private void assertEveryCrashPointRecoversAsBefore(List<String> legOrder) throws IOException {
+    // A crash can stop the disk at any of the captured states. In each, no leg may claim more than the
+    // provider did, and a restart from it must hold the players while a receipt is open and free them after.
+    private void assertEveryCrashPointClaimsNoMoreThanTheProviderDid(List<String> legOrder) throws IOException {
         journal.flush();
         int i = 0;
         for (Map<String, String> state : List.copyOf(states)) {
             String open = state.entrySet().stream().filter(e -> e.getKey().startsWith("pending/"))
                     .map(Map.Entry::getValue).findFirst().orElse(null);
             assertTrue(state.keySet().stream().filter(k -> k.startsWith("pending/")).count() <= 1);
-            if (open != null) assertClaimsNoMoreThanHappened(open, legOrder);
+            if (open != null) assertNoLegClaimsMoreThanTheProviderDid(open, legOrder);
 
             Path restart = folder.resolve("restart-" + i++);
             for (var file : state.entrySet()) {
@@ -165,7 +165,7 @@ class SettlementJournalTest {
 
     // every leg on disk is IN_FLIGHT or the provider's real answer (a zero leg succeeds without a call),
     // and only known legs appear
-    private void assertClaimsNoMoreThanHappened(String text, List<String> legOrder) throws IOException {
+    private void assertNoLegClaimsMoreThanTheProviderDid(String text, List<String> legOrder) throws IOException {
         Properties p = new Properties();
         p.load(new StringReader(text));
         for (String key : p.stringPropertyNames()) {
@@ -192,11 +192,11 @@ class SettlementJournalTest {
         }
     }
 
-    @Test void aPaidTradeRecoversAsBeforeFromACrashAtAnyStep() throws IOException {
+    @Test void aPaidTradeClaimsNoMoreThanTheProviderDidAtAnyCrashPoint() throws IOException {
         pays(true, true, true, true, true);
         assertEquals(TradeManager.Failure.NONE, settle(10, 20));
         assertTrue(states.get(states.size() - 1).keySet().stream().allMatch(k -> k.startsWith("receipts/")));
-        assertEveryCrashPointRecoversAsBefore(List.of("debit-a", "debit-b", "credit-a", "credit-b"));
+        assertEveryCrashPointClaimsNoMoreThanTheProviderDid(List.of("debit-a", "debit-b", "credit-a", "credit-b"));
     }
 
     @Test void aPaidTradeWritesItsReceiptTwice() {
@@ -206,22 +206,22 @@ class SettlementJournalTest {
         assertEquals(List.of("write", "write", "move"), ops.stream().map(WatchedJournal.Op::kind).toList());
     }
 
-    @Test void anItemOnlyTradeRecoversAsBeforeFromACrashAtAnyStep() throws IOException {
+    @Test void anItemOnlyTradeClaimsNoMoreThanTheProviderDidAtAnyCrashPoint() throws IOException {
         pays(true, true, true, true, true);
         assertEquals(TradeManager.Failure.NONE, settle(0, 0));
         verify(economy, never()).withdraw(any(), anyDouble());
-        assertEveryCrashPointRecoversAsBefore(List.of("debit-a", "debit-b", "credit-a", "credit-b"));
+        assertEveryCrashPointClaimsNoMoreThanTheProviderDid(List.of("debit-a", "debit-b", "credit-a", "credit-b"));
     }
 
-    @Test void aRefundedTradeRecoversAsBeforeFromACrashAtAnyStep() throws IOException {
+    @Test void aRefundedTradeClaimsNoMoreThanTheProviderDidAtAnyCrashPoint() throws IOException {
         pays(true, false, true, true, true);
         assertEquals(TradeManager.Failure.ECONOMY_ERROR, settle(10, 20));
         verify(economy).deposit(a, 10);
         assertTrue(journal.pending().isEmpty());
-        assertEveryCrashPointRecoversAsBefore(List.of("debit-a", "debit-b", "credit-a", "credit-b", "refund-a"));
+        assertEveryCrashPointClaimsNoMoreThanTheProviderDid(List.of("debit-a", "debit-b", "credit-a", "credit-b", "refund-a"));
     }
 
-    @Test void aHeldTradeRecoversAsBeforeFromACrashAtAnyStep() throws IOException {
+    @Test void aHeldTradeClaimsNoMoreThanTheProviderDidAtAnyCrashPoint() throws IOException {
         pays(true, true, true, false, true);
         assertEquals(TradeManager.Failure.RECOVERY_REQUIRED, settle(10, 20));
         // the held result reaches disk on its own, without another journal call
@@ -230,7 +230,7 @@ class SettlementJournalTest {
             Thread.onSpinWait();
         }
         assertEquals("REJECTED", onDisk().getProperty("leg.credit-b.status"));
-        assertEveryCrashPointRecoversAsBefore(List.of("debit-a", "debit-b", "credit-a", "credit-b"));
+        assertEveryCrashPointClaimsNoMoreThanTheProviderDid(List.of("debit-a", "debit-b", "credit-a", "credit-b"));
     }
 
     @Test void aJournalThatCannotBeginRefusesBeforeAnyPayment() {

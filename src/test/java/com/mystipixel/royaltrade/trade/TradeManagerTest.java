@@ -235,8 +235,7 @@ class TradeManagerTest {
     }
     @Test void aSaveStillOwedIsMadeBeforeTheFirstDebit() {
         when(escrow.saveStaged()).thenReturn(1L);
-        manager.persist(session);
-        runScheduled();                                      // written, but its after-write save has not run
+        manager.persist(session);                            // written, but its after-write save has not run
         when(escrow.isDurable()).thenReturn(true);
         assertEquals(TradeManager.Failure.NONE, manager.commit(session));
         verify(escrow, never()).hold(any(), anyMap());
@@ -301,36 +300,62 @@ class TradeManagerTest {
         when(escrow.durableSeq()).thenReturn(seq);
         landed.getValue().run();
     }
+    @Test void theFirstChangeIsWrittenWithoutWaitingForTheScheduler() {
+        when(escrow.saveStaged()).thenReturn(1L);
+        manager.persist(session);
+        verify(escrow, times(1)).saveStaged();
+        verify(escrow).whenDurable(eq(1L), any());
+        assertEquals(1, scheduled.size());                   // only the end of the write window
+        runScheduled();
+        verify(escrow, times(1)).saveStaged();               // nothing changed since, nothing more to write
+    }
     @Test void persistSavesThePlayersOnlyOnceTheEscrowWriteIsOnDisk() {
         when(escrow.saveStaged()).thenReturn(1L);
         manager.persist(session);
-        verify(escrow, never()).saveStaged();
-        runScheduled();
         verify(escrow, times(1)).saveStaged();               // one write for both sides
         verify(a, never()).saveData();
         landWrite(1L);
-        verify(a).saveData();
+        InOrder order = inOrder(escrow, a);
+        order.verify(escrow).saveStaged();
+        order.verify(a).saveData();
         verify(b).saveData();
     }
-    @Test void aBurstOfChangesIsOneEscrowWriteAndOneSaveEach() {
-        when(escrow.saveStaged()).thenReturn(1L);
+    @Test void aBurstOfChangesIsTwoEscrowWritesAndOneSaveEach() {
+        when(escrow.saveStaged()).thenReturn(1L, 2L);
         for (int i = 0; i < 27; i++) manager.persist(session);
         verify(escrow, times(27)).stage(any(), anyMap());
-        assertEquals(1, scheduled.size());
-        runScheduled();
         verify(escrow, times(1)).saveStaged();
-        landWrite(1L);
+        assertEquals(1, scheduled.size());
+        landWrite(1L);                                       // the first write no longer holds the latest offers
+        verify(a, never()).saveData();
+        runScheduled();
+        verify(escrow, times(2)).saveStaged();
+        verify(a, never()).saveData();
+        landWrite(2L);
         verify(a, times(1)).saveData();
         verify(b, times(1)).saveData();
+        runScheduled();
+        verify(escrow, times(2)).saveStaged();
     }
     @Test void aChangeAfterTheWriteHoldsTheSaveForTheNextWrite() {
         when(escrow.saveStaged()).thenReturn(1L, 2L);
         manager.persist(session);
-        runScheduled();
         manager.persist(session);                            // not in write 1
         landWrite(1L);
         verify(a, never()).saveData();
         runScheduled();
+        landWrite(2L);
+        InOrder order = inOrder(escrow, a);
+        order.verify(escrow, times(2)).saveStaged();
+        order.verify(a).saveData();
+        verify(a, times(1)).saveData();
+    }
+    @Test void aChangeAfterTheWindowClosesIsWrittenAtOnce() {
+        when(escrow.saveStaged()).thenReturn(1L, 2L);
+        manager.persist(session);
+        runScheduled();
+        manager.persist(session);
+        verify(escrow, times(2)).saveStaged();
         landWrite(2L);
         verify(a, times(1)).saveData();
     }
@@ -340,7 +365,6 @@ class TradeManagerTest {
         manager.returnedTo(a, back);
         manager.persist(session);
         verify(escrow).stage(any(), argThat(offers -> offers.get(a.getUniqueId()).contains(back)));
-        runScheduled();
         landWrite(1L);
         InOrder order = inOrder(a, escrow);
         order.verify(a).saveData();

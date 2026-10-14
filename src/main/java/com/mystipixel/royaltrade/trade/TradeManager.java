@@ -44,8 +44,8 @@ public final class TradeManager {
         void later(Runnable task, long ticks);
     }
 
-    // offer changes inside this window share one escrow write and one save per player
-    private static final long WRITE_DELAY_TICKS = 10L;
+    // the first offer change is written at once; later ones inside this window share one more write
+    private static final long WRITE_WINDOW_TICKS = 10L;
 
     private final PaymentJournal payments;
     private final Logger logger;
@@ -66,7 +66,8 @@ public final class TradeManager {
     private final Set<UUID> staged = new HashSet<>();
     // items taken back out of an offer; escrow keeps them until the owner's data is saved with them
     private final Map<UUID, List<ItemStack>> returned = new HashMap<>();
-    private boolean writeScheduled;
+    private boolean writeWindowOpen;
+    private boolean stagedInWindow;
     // target -> (requester -> sent at); several per target so a second request can't wipe the first
     private final Map<UUID, Map<UUID, Long>> requests = new HashMap<>();
 
@@ -112,10 +113,11 @@ public final class TradeManager {
     }
 
     /**
-     * Escrow the current offers. Changes within half a second share one escrow write, and both
-     * players' data is saved once that write is on disk, so a crash can't restore an escrowed item from a
-     * stale player save. Escrow first: a crash between the writes duplicates rather than loses. Items
-     * leaving escrow need the reverse order, see {@link #returnedTo}.
+     * Escrow the current offers. The first change is written at once and later changes within half a
+     * second share one more write. Both players' data is saved once the write holding their change is on
+     * disk, so a crash can't restore an escrowed item from a stale player save. Escrow first: a crash
+     * between the writes duplicates rather than loses. Items leaving escrow need the reverse order, see
+     * {@link #returnedTo}.
      */
     public void persist(TradeSession session) {
         UUID id = ids.get(session);
@@ -136,15 +138,27 @@ public final class TradeManager {
         returned.computeIfAbsent(player.getUniqueId(), k -> new ArrayList<>()).add(stack);
     }
 
+    // not deferred: if an autosave or another plugin saves the player while the item they just offered
+    // is only staged in memory, a crash loses it
     private void scheduleWrite() {
-        if (!writeScheduled) {
-            writeScheduled = true;
-            scheduler.later(this::writeStaged, WRITE_DELAY_TICKS);
+        if (writeWindowOpen) {
+            stagedInWindow = true;
+            return;
+        }
+        writeWindowOpen = true;
+        writeStaged();
+        scheduler.later(this::closeWriteWindow, WRITE_WINDOW_TICKS);
+    }
+
+    private void closeWriteWindow() {
+        writeWindowOpen = false;
+        if (stagedInWindow) {
+            stagedInWindow = false;
+            scheduleWrite();
         }
     }
 
     private void writeStaged() {
-        writeScheduled = false;
         long seq = escrow.saveStaged();
         for (UUID player : staged) {
             savesDue.merge(player, seq, Math::max);
