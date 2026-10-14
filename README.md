@@ -42,8 +42,10 @@ debit with a confirmed refund, can return to the normal confirmation flow. Faile
 credits, and unknown provider outcomes hold the trade for staff reconciliation instead of completing
 it or charging again.
 
-**Escrow and recovery.** Open offers are written to disk on each change. Ordinary interrupted offers
-return on next login; offers belonging to an unresolved payment remain held, including after restart.
+**Escrow and recovery.** Open offers are written to disk as soon as they change, and always before a
+trade settles. Further changes within the next half second share one more write. Ordinary interrupted
+offers return on next login; offers belonging to an unresolved payment remain held, including after
+restart.
 Both participants are blocked from new trades until staff reconcile the payment and item records.
 See [payment recovery](docs/payment-recovery.md) before clearing a hold or rolling back plugin versions.
 

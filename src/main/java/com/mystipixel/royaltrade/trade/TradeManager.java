@@ -39,6 +39,14 @@ public final class TradeManager {
         RESTRICTED
     }
 
+    /** Runs a task on the main thread after a number of ticks. */
+    public interface Scheduler {
+        void later(Runnable task, long ticks);
+    }
+
+    // the first offer change is written at once; later ones inside this window share one more write
+    private static final long WRITE_WINDOW_TICKS = 10L;
+
     private final PaymentJournal payments;
     private final Logger logger;
     private final Set<UUID> recoveryPlayers = new HashSet<>();
@@ -47,17 +55,25 @@ public final class TradeManager {
     private final TradeLog log;
     private final EconGuardHook econGuard;
     private final SkyblockSaveHook skyblockSave;
+    private final Scheduler scheduler;
 
     private final Map<UUID, TradeSession> byPlayer = new HashMap<>();
     private final Map<UUID, TradeSession> byId = new HashMap<>();
     private final Map<TradeSession, UUID> ids = new HashMap<>();
     // player -> the escrow write that must be on disk before their data is saved
     private final Map<UUID, Long> savesDue = new HashMap<>();
+    // players whose offer changed since the last escrow write; their save waits for the next one
+    private final Set<UUID> staged = new HashSet<>();
+    // items taken back out of an offer; escrow keeps them until the owner's data is saved with them
+    private final Map<UUID, List<ItemStack>> returned = new HashMap<>();
+    private boolean writeWindowOpen;
+    private boolean stagedInWindow;
     // target -> (requester -> sent at); several per target so a second request can't wipe the first
     private final Map<UUID, Map<UUID, Long>> requests = new HashMap<>();
 
     public TradeManager(EconomyHook economy, Escrow escrow, TradeLog log, EconGuardHook econGuard,
-                        SkyblockSaveHook skyblockSave, PaymentJournal payments, Logger logger) {
+                        SkyblockSaveHook skyblockSave, PaymentJournal payments, Scheduler scheduler, Logger logger) {
+        this.scheduler = scheduler;
         this.payments = payments;
         this.logger = logger;
         for (var record : payments.pending().values()) {
@@ -97,47 +113,141 @@ public final class TradeManager {
     }
 
     /**
-     * Queue the escrow write, and save both players' data once it is on disk, so a crash can't restore
-     * an escrowed item from a stale player save. Escrow first: a crash between the writes duplicates
-     * rather than loses. Items leaving escrow need the reverse order (save the inventory first).
+     * Escrow the current offers. The first change is written at once and later changes within half a
+     * second share one more write. Both players' data is saved once the write holding their change is on
+     * disk, so a crash can't restore an escrowed item from a stale player save. Escrow first: a crash
+     * between the writes duplicates rather than loses. Items leaving escrow need the reverse order, see
+     * {@link #returnedTo}.
      */
     public void persist(TradeSession session) {
         UUID id = ids.get(session);
         if (id == null) {
             return;
         }
-        long seq = holdEscrow(id, session);
-        savesDue.merge(session.a().playerId(), seq, Math::max);
-        savesDue.merge(session.b().playerId(), seq, Math::max);
+        escrow.stage(id, offers(session));
+        staged.add(session.a().playerId());
+        staged.add(session.b().playerId());
+        scheduleWrite();
+    }
+
+    /**
+     * Note an item taken back out of an offer, before {@link #persist}. Escrow keeps a copy until the
+     * player's data has been saved with the item back in it.
+     */
+    public void returnedTo(Player player, ItemStack stack) {
+        returned.computeIfAbsent(player.getUniqueId(), k -> new ArrayList<>()).add(stack);
+    }
+
+    // not deferred: if an autosave or another plugin saves the player while the item they just offered
+    // is only staged in memory, a crash loses it
+    private void scheduleWrite() {
+        if (writeWindowOpen) {
+            stagedInWindow = true;
+            return;
+        }
+        writeWindowOpen = true;
+        writeStaged();
+        scheduler.later(this::closeWriteWindow, WRITE_WINDOW_TICKS);
+    }
+
+    private void closeWriteWindow() {
+        writeWindowOpen = false;
+        if (stagedInWindow) {
+            stagedInWindow = false;
+            scheduleWrite();
+        }
+    }
+
+    private void writeStaged() {
+        long seq = escrow.saveStaged();
+        for (UUID player : staged) {
+            savesDue.merge(player, seq, Math::max);
+        }
+        staged.clear();
         escrow.whenDurable(seq, this::saveDue);
     }
 
-    // settlement: nothing may leave a player until escrow is on disk
+    // settlement: nothing may leave a player until escrow on disk holds exactly the offers and their saved
+    // data agrees with it. The write cycle has normally done all of that, so this usually writes nothing
     private void persistNow(UUID id, TradeSession session) {
+        UUID a = session.a().playerId();
+        UUID b = session.b().playerId();
+        if (escrow.isDurable() && !staged.contains(a) && !staged.contains(b)
+                && !returned.containsKey(a) && !returned.containsKey(b)) {
+            saveIfDue(a);
+            saveIfDue(b);
+            return;
+        }
         holdEscrow(id, session);
         escrow.flush();
+        staged.remove(a);
+        staged.remove(b);
+        savesDue.remove(a);
+        savesDue.remove(b);
         saveInventories(session);
+        // a held trade's escrow must show only the offers, not what was already taken back
+        if (returned.remove(a) != null | returned.remove(b) != null) {
+            holdEscrow(id, session);
+            escrow.flush();
+        }
+    }
+
+    // only called once escrow is fully on disk, so any save still owed is safe now
+    private void saveIfDue(UUID player) {
+        if (savesDue.remove(player) != null) {
+            saveInventory(Bukkit.getPlayer(player));
+        }
     }
 
     private long holdEscrow(UUID id, TradeSession session) {
-        return escrow.hold(id, Map.of(session.a().playerId(), session.a().offered(),
-                session.b().playerId(), session.b().offered()));
+        return escrow.hold(id, offers(session));
+    }
+
+    private Map<UUID, List<ItemStack>> offers(TradeSession session) {
+        return Map.of(session.a().playerId(), withReturned(session.a()),
+                session.b().playerId(), withReturned(session.b()));
+    }
+
+    private List<ItemStack> withReturned(TradeSession.Side side) {
+        List<ItemStack> back = returned.get(side.playerId());
+        if (back == null) {
+            return side.offered();
+        }
+        List<ItemStack> all = new ArrayList<>(side.offered());
+        all.addAll(back);
+        return all;
     }
 
     // a player whose escrow changed again since waits for that newer write
     private void saveDue() {
         long durable = escrow.durableSeq();
+        List<UUID> saved = new ArrayList<>();
         savesDue.entrySet().removeIf(due -> {
-            if (due.getValue() > durable) {
+            if (due.getValue() > durable || staged.contains(due.getKey())) {
                 return false;
             }
             saveInventory(Bukkit.getPlayer(due.getKey()));
+            saved.add(due.getKey());
             return true;
         });
+        saved.forEach(this::dropReturned);
     }
 
-    /** Write a player's data now so it agrees with escrow. A failed save is logged, not thrown. */
-    public void saveInventory(Player player) {
+    // the player's saved data now has what they took back, so escrow can let go of it
+    private void dropReturned(UUID player) {
+        if (returned.remove(player) == null) {
+            return;
+        }
+        TradeSession session = byPlayer.get(player);
+        UUID id = session == null ? null : ids.get(session);
+        if (id != null) {
+            escrow.stage(id, offers(session));
+            scheduleWrite();
+        }
+    }
+
+    // a failed save is logged, not thrown
+    private void saveInventory(Player player) {
         if (player == null || !player.isOnline()) {
             return;
         }
@@ -168,8 +278,13 @@ public final class TradeManager {
         if (id != null) {
             byId.remove(id);
         }
-        byPlayer.remove(session.a().playerId());
-        byPlayer.remove(session.b().playerId());
+        for (UUID player : List.of(session.a().playerId(), session.b().playerId())) {
+            byPlayer.remove(player);
+            // both were just saved with everything back or delivered
+            savesDue.remove(player);
+            staged.remove(player);
+            returned.remove(player);
+        }
     }
 
     public void request(Player from, Player to, long expiryMillis) {
@@ -285,8 +400,14 @@ public final class TradeManager {
             logger.log(java.util.logging.Level.SEVERE, "Cannot persist trade intent; no payment attempted", e);
             return Failure.ECONOMY_ERROR;
         }
+        // one intent write guards every leg and the delivery; the results go out with the close
+        List<PaymentJournal.Leg> legs = List.of(
+                new PaymentJournal.Leg("debit-a", pa.getUniqueId(), coinsA, false),
+                new PaymentJournal.Leg("debit-b", pb.getUniqueId(), coinsB, false),
+                new PaymentJournal.Leg("credit-a", pa.getUniqueId(), coinsB, true),
+                new PaymentJournal.Leg("credit-b", pb.getUniqueId(), coinsA, true));
         try {
-            payments.begin(attempt, pa.getUniqueId(), pb.getUniqueId(), "trade:" + id);
+            payments.begin(attempt, pa.getUniqueId(), pb.getUniqueId(), "trade:" + id, legs, true);
         } catch (RuntimeException e) {
             // a timed-out write may still land; nothing was paid, so it must not hold the players later
             payments.discard(attempt);

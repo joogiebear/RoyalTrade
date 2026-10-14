@@ -37,6 +37,8 @@ public final class Escrow {
     private YamlConfiguration data;
     // false until load succeeds, so a failed load never writes an empty store over the real one
     private boolean loaded;
+    // changes made by stage() that no write has picked up yet
+    private boolean staged;
 
     public Escrow(File dataFolder, Logger logger, Executor mainThread) {
         this.file = new File(dataFolder, "escrow.yml");
@@ -92,11 +94,22 @@ public final class Escrow {
      * number for {@link #whenDurable}.
      */
     public long hold(UUID sessionId, Map<UUID, List<ItemStack>> offers) {
+        stage(sessionId, offers);
+        return save();
+    }
+
+    /** Like {@link #hold}, but the write waits for {@link #saveStaged} or any other change's write. */
+    public void stage(UUID sessionId, Map<UUID, List<ItemStack>> offers) {
         for (Map.Entry<UUID, List<ItemStack>> offer : offers.entrySet()) {
             String path = ESCROW + "." + sessionId + "." + offer.getKey();
             data.set(path, offer.getValue().isEmpty() ? null : new ArrayList<>(offer.getValue()));
         }
-        return save();
+        staged = true;
+    }
+
+    /** Writes what was staged. Returns the number of the write that covers it, for {@link #whenDurable}. */
+    public long saveStaged() {
+        return staged ? save() : writer.requested();
     }
 
     /** Forget a session once its items are back in inventories. */
@@ -168,6 +181,11 @@ public final class Escrow {
         writer.whenDurable(seq, () -> mainThread.execute(task));
     }
 
+    /** True when every change so far is on disk. */
+    public boolean isDurable() {
+        return !staged && writer.durable() >= writer.requested();
+    }
+
     /** The newest write that is on disk. */
     public long durableSeq() {
         return writer.durable();
@@ -187,6 +205,8 @@ public final class Escrow {
 
     // serialised here on the main thread so the snapshot is consistent; written in the background
     private long save() {
-        return writer.submit(data.saveToString());
+        long seq = writer.submit(data.saveToString());
+        staged = false;
+        return seq;
     }
 }

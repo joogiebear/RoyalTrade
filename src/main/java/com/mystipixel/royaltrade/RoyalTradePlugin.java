@@ -89,7 +89,11 @@ public final class RoyalTradePlugin extends JavaPlugin {
 
         econGuard = new EconGuardHook();
         skyblockSave = new SkyblockSaveHook(getLogger());
-        trades = new TradeManager(economy, escrow, log, econGuard, skyblockSave, payments, getLogger());
+        trades = new TradeManager(economy, escrow, log, econGuard, skyblockSave, payments, (task, ticks) -> {
+            if (isEnabled()) {
+                getServer().getScheduler().runTaskLater(this, task, ticks);
+            }
+        }, getLogger());
         gui = new TradeGui(economy, this::settleMillis, this::confirmDelayMillis,
                 TradeMenu.load(getDataFolder(), getLogger()));
         textInput = new TextInput(this, messages);
