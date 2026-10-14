@@ -28,13 +28,15 @@ class TradeManagerTest {
     TradeSession session;
     MockedStatic<Bukkit> bukkit;
     PaymentJournal journal;
+    final List<Runnable> scheduled = new ArrayList<>();
 
     @BeforeEach void setup() {
         economy = mock(EconomyHook.class); escrow = mock(Escrow.class);
         log = mock(TradeLog.class); guard = mock(EconGuardHook.class);
         skyblock = mock(SkyblockSaveHook.class);
         journal = new PaymentJournal(folder.resolve("payments"), java.util.logging.Logger.getLogger("test"));
-        manager = new TradeManager(economy, escrow, log, guard, skyblock, journal, java.util.logging.Logger.getLogger("test"));
+        manager = new TradeManager(economy, escrow, log, guard, skyblock, journal, (task, ticks) -> scheduled.add(task),
+                java.util.logging.Logger.getLogger("test"));
         a = player("a"); b = player("b");
         bukkit = mockStatic(Bukkit.class);
         bukkit.when(() -> Bukkit.getPlayer(a.getUniqueId())).thenReturn(a);
@@ -133,7 +135,7 @@ class TradeManagerTest {
         journal.close();
         PaymentJournal reopened = new PaymentJournal(folder.resolve("payments"), java.util.logging.Logger.getLogger("test"));
         TradeManager restarted = new TradeManager(economy, escrow, log, guard, mock(SkyblockSaveHook.class),
-                reopened, java.util.logging.Logger.getLogger("test"));
+                reopened, (task, ticks) -> { }, java.util.logging.Logger.getLogger("test"));
         reopened.close();
         assertTrue(restarted.needsRecovery(a)); assertTrue(restarted.inTrade(b));
         assertThrows(IllegalStateException.class, () -> restarted.open(a, b));
@@ -232,14 +234,29 @@ class TradeManagerTest {
         verify(a, times(1)).saveData();
     }
     @Test void aSaveStillOwedIsMadeBeforeTheFirstDebit() {
-        when(escrow.hold(any(), anyMap())).thenReturn(1L);
-        manager.persist(session);                            // its after-write save has not run yet
+        when(escrow.saveStaged()).thenReturn(1L);
+        manager.persist(session);
+        runScheduled();                                      // written, but its after-write save has not run
         when(escrow.isDurable()).thenReturn(true);
         assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        verify(escrow, never()).hold(any(), anyMap());
         InOrder order = inOrder(a, economy);
         order.verify(a).saveData();
         order.verify(economy).withdraw(a, 10);
         verify(a, times(2)).saveData();
+    }
+    @Test void anItemTakenBackIsSavedThenDroppedFromEscrowBeforeTheFirstDebit() {
+        ItemStack back = mock(ItemStack.class);
+        manager.returnedTo(a, back);
+        manager.persist(session);
+        assertEquals(TradeManager.Failure.NONE, manager.commit(session));
+        InOrder order = inOrder(escrow, a, economy);
+        order.verify(escrow).hold(any(), argThat(offers -> offers.get(a.getUniqueId()).contains(back)));
+        order.verify(escrow).flush();
+        order.verify(a).saveData();
+        order.verify(escrow).hold(any(), argThat(offers -> !offers.get(a.getUniqueId()).contains(back)));
+        order.verify(escrow).flush();
+        order.verify(economy).withdraw(a, 10);
     }
     @Test void anEscrowThatCannotReachDiskMovesNothing() {
         doThrow(new java.io.UncheckedIOException(new java.io.IOException("disk full"))).when(escrow).flush();
@@ -272,17 +289,72 @@ class TradeManagerTest {
         order.verify(a).saveData();
         order.verify(escrow).release(any());
     }
-    @Test void persistSavesThePlayersOnlyOnceTheEscrowWriteIsOnDisk() {
-        when(escrow.hold(any(), anyMap())).thenReturn(1L);
-        manager.persist(session);
-        verify(escrow, times(1)).hold(any(), anyMap());      // one write for both sides
-        verify(a, never()).saveData();
+    private void runScheduled() {
+        List<Runnable> due = List.copyOf(scheduled);
+        scheduled.clear();
+        due.forEach(Runnable::run);
+    }
+    // runs the after-write callback for write seq as if it had just landed
+    private void landWrite(long seq) {
         org.mockito.ArgumentCaptor<Runnable> landed = org.mockito.ArgumentCaptor.forClass(Runnable.class);
-        verify(escrow).whenDurable(eq(1L), landed.capture());
-        when(escrow.durableSeq()).thenReturn(1L);
+        verify(escrow, atLeastOnce()).whenDurable(eq(seq), landed.capture());
+        when(escrow.durableSeq()).thenReturn(seq);
         landed.getValue().run();
+    }
+    @Test void persistSavesThePlayersOnlyOnceTheEscrowWriteIsOnDisk() {
+        when(escrow.saveStaged()).thenReturn(1L);
+        manager.persist(session);
+        verify(escrow, never()).saveStaged();
+        runScheduled();
+        verify(escrow, times(1)).saveStaged();               // one write for both sides
+        verify(a, never()).saveData();
+        landWrite(1L);
         verify(a).saveData();
         verify(b).saveData();
+    }
+    @Test void aBurstOfChangesIsOneEscrowWriteAndOneSaveEach() {
+        when(escrow.saveStaged()).thenReturn(1L);
+        for (int i = 0; i < 27; i++) manager.persist(session);
+        verify(escrow, times(27)).stage(any(), anyMap());
+        assertEquals(1, scheduled.size());
+        runScheduled();
+        verify(escrow, times(1)).saveStaged();
+        landWrite(1L);
+        verify(a, times(1)).saveData();
+        verify(b, times(1)).saveData();
+    }
+    @Test void aChangeAfterTheWriteHoldsTheSaveForTheNextWrite() {
+        when(escrow.saveStaged()).thenReturn(1L, 2L);
+        manager.persist(session);
+        runScheduled();
+        manager.persist(session);                            // not in write 1
+        landWrite(1L);
+        verify(a, never()).saveData();
+        runScheduled();
+        landWrite(2L);
+        verify(a, times(1)).saveData();
+    }
+    @Test void escrowKeepsAnItemTakenBackUntilItsOwnerIsSaved() {
+        ItemStack back = mock(ItemStack.class);
+        when(escrow.saveStaged()).thenReturn(1L, 2L);
+        manager.returnedTo(a, back);
+        manager.persist(session);
+        verify(escrow).stage(any(), argThat(offers -> offers.get(a.getUniqueId()).contains(back)));
+        runScheduled();
+        landWrite(1L);
+        InOrder order = inOrder(a, escrow);
+        order.verify(a).saveData();
+        order.verify(escrow).stage(any(), argThat(offers -> !offers.get(a.getUniqueId()).contains(back)));
+        runScheduled();
+        verify(escrow, times(2)).saveStaged();
+    }
+    @Test void cancelForgetsWhatWasWaitingToBeSaved() {
+        manager.returnedTo(a, mock(ItemStack.class));
+        manager.persist(session);
+        manager.cancel(session);
+        verify(a).saveData();
+        runScheduled();
+        verify(a, times(1)).saveData();
     }
     @Test void aFailedPlayerSaveDoesNotFailTheTrade() {
         doThrow(new IllegalStateException("disk full")).when(a).saveData();

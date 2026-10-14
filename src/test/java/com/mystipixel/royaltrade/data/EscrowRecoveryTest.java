@@ -69,4 +69,16 @@ class EscrowRecoveryTest {
         assertTrue(store.durableSeq() >= seq);
         store.close();
     }
+    @Test void stagedChangesWaitForTheNextWrite() throws Exception {
+        Path folder = Files.createDirectory(root.resolve("data"));
+        var store = new Escrow(folder.toFile(), Logger.getLogger("test"), Runnable::run);
+        store.load(Set.of());
+        store.stage(UUID.randomUUID(), Map.of(UUID.randomUUID(), List.of()));
+        assertFalse(store.isDurable());
+        long seq = store.saveStaged();
+        store.flush();
+        assertTrue(store.isDurable());
+        assertEquals(seq, store.saveStaged());               // nothing new, so no new write
+        store.close();
+    }
 }

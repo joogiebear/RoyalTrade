@@ -46,7 +46,7 @@ class SettlementJournalTest {
         journal = WatchedJournal.open(folder.resolve("payments"),
                 kind -> { if (failWrites) throw new IOException("disk full"); },
                 op -> { ops.add(op); states.add(snapshot()); });
-        manager = new TradeManager(economy, escrow, mock(TradeLog.class), guard, mock(SkyblockSaveHook.class), journal, Logger.getLogger("test"));
+        manager = new TradeManager(economy, escrow, mock(TradeLog.class), guard, mock(SkyblockSaveHook.class), journal, (task, ticks) -> { }, Logger.getLogger("test"));
         states.add(snapshot());
         a = player("a"); b = player("b");
         bukkit = mockStatic(Bukkit.class);
@@ -151,7 +151,7 @@ class SettlementJournalTest {
             PaymentJournal reopened = new PaymentJournal(restart, Logger.getLogger("test"));
             try {
                 TradeManager restarted = new TradeManager(economy, escrow, mock(TradeLog.class), guard, mock(SkyblockSaveHook.class), reopened,
-                        Logger.getLogger("test"));
+                        (task, ticks) -> { }, Logger.getLogger("test"));
                 Set<String> held = new HashSet<>();
                 reopened.pending().values().forEach(p -> held.add(p.getProperty("reason")));
                 assertEquals(open != null, restarted.needsRecovery(a), "state " + state);
@@ -257,7 +257,7 @@ class SettlementJournalTest {
             journal = WatchedJournal.open(folder.resolve("bench-" + coins[0] + "-" + coins[1]),
                     kind -> { try { Thread.sleep(diskMs); } catch (InterruptedException e) { throw new IOException(e); } },
                     ops::add);
-            manager = new TradeManager(economy, escrow, mock(TradeLog.class), guard, mock(SkyblockSaveHook.class), journal, Logger.getLogger("test"));
+            manager = new TradeManager(economy, escrow, mock(TradeLog.class), guard, mock(SkyblockSaveHook.class), journal, (task, ticks) -> { }, Logger.getLogger("test"));
             session = manager.open(a, b);
             when(economy.withdraw(any(), anyDouble())).thenReturn(true);
             when(economy.deposit(any(), anyDouble())).thenReturn(true);

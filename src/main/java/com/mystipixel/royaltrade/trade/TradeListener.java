@@ -139,12 +139,12 @@ public final class TradeListener implements Listener {
             boolean hadConfirmation = anyConfirmed(session);
             ItemStack removed = session.removeItem(side, index);
             if (removed != null) {
+                // escrow keeps a copy until the inventory is saved with it: a crash duplicates, never loses
+                plugin.trades().returnedTo(player, removed.clone());
                 Map<Integer, ItemStack> leftover = player.getInventory().addItem(removed);
                 for (ItemStack stack : leftover.values()) {
                     player.getWorld().dropItemNaturally(player.getLocation(), stack);
                 }
-                // inventory before escrow when an item comes out: a crash duplicates, never loses
-                plugin.trades().saveInventory(player);
                 afterChange(session, player, hadConfirmation);
             }
         }
